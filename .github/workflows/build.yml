@@ -237,7 +237,10 @@ jobs:
         run: |
           git tag -f "v$VERSION" "$GITHUB_SHA"
           git push -f origin "refs/tags/v$VERSION"
+          # el instalador llega en out/installer_out/: todo a out/
+          find out -mindepth 2 -type f -exec mv -t out/ {} +
           ls -lh out
+          test -f out/TheWatcher-Setup-Win81.exe
 
       - name: Publicar en el Release
         uses: softprops/action-gh-release@v2
