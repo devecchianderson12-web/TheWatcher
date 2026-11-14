@@ -6,6 +6,7 @@ from qt import (QApplication, QButtonGroup, QCursor, QEvent, qexec, QGridLayout,
 
 import config
 import layout as L
+from camfps_dialog import CameraFpsDialog
 from discovery_dialogs import NetScanDialog, OnvifDialog
 from layout_editor import LayoutDialog
 from stream_manager import QUALITY_MAIN
@@ -206,6 +207,10 @@ class MainWindow(QWidget):
         self.save()
         for w in self.widgets:
             w.worker.fps = self._fps_zoom() if w is self.zoomed else value
+
+    def camera_fps(self, cam):
+        """FPS que codifica la cámara (por su protocolo nativo), hasta el máximo de cada una."""
+        qexec(CameraFpsDialog(cam, self))
 
     def toggle_show_fps(self):
         self.cfg["show_fps"] = not self.cfg.get("show_fps", False)

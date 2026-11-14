@@ -49,6 +49,7 @@ def _gui_check():
     import numpy as np
     import layout as LY
     import qt
+    from camfps_dialog import CameraFpsDialog
     from discovery_dialogs import NetScanDialog, OnvifDialog
     from layout_editor import LayoutDialog
     from mainwindow import MainWindow
@@ -90,6 +91,13 @@ def _gui_check():
                 OnvifDialog(set()), NetScanDialog(set())):
         assert not dlg.grab().isNull()
         dlg._stop.set() if hasattr(dlg, "_stop") else None
+    fd = CameraFpsDialog(cam)                             # FPS de la cámara: tope por cámara
+    fd._show({"max": 25, "streams": [
+        {"channel": 0, "key": "MainFormat", "label": "Convencional", "resolution": "3M", "fps": 30},
+        {"channel": 0, "key": "ExtraFormat", "label": "Transmisión", "resolution": "D1", "fps": 12}]})
+    assert fd._rows["MainFormat"].maximum() == 25 and fd._rows["MainFormat"].value() == 25
+    assert fd._rows["ExtraFormat"].value() == 12
+    assert not fd.grab().isNull()
     for x in list(win.widgets):
         x.shutdown()
     return "OK (Qt %s)" % qt.QT_VERSION_STR

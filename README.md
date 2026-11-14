@@ -4,7 +4,8 @@ Visor multicámara RTSP / ONVIF ultraligero para cámaras iCSee y compatibles. S
 (FFmpeg vía PyAV y Qt van dentro). Windows 8.1 / 10 / 11 (64 bits) y Linux (x86_64, glibc 2.35+: Debian 12+, Ubuntu 22.04+, antiX 23+).
 
 ## Descargas (Releases)
-En **Releases → «Última versión (automática)»** están siempre los archivos de la última subida (Windows y Linux).
+En **Releases → «The Watcher X.Y.Z»** (el marcado como *Latest*) están siempre los archivos de la última subida
+(Windows y Linux).
 
 - **Windows:** `TheWatcher-Setup-Win81.exe` (instalador) o `TheWatcher-Win81-portable.zip`.
 - **Linux (Debian, Ubuntu, Mint, antiX 23+):** `thewatcher_X.Y.Z_amd64.deb` →
@@ -17,6 +18,11 @@ En **Releases → «Última versión (automática)»** están siempre los archiv
   *Pantalla completa*, *Cámaras*.
 - **Clic derecho en una cámara:** Transmisión / Convencional · Resolución · Ajuste de imagen · Fluidez (FPS) ·
   Monitor de rendimiento (opacidad, actualización) · Pantalla completa · Personalizar cuadrícula · Cámaras.
+- **FPS de la cámara (hasta su máximo)…** (clic derecho): cambia los cuadros que **graba la cámara**, no solo los
+  que se muestran. Habla con la cámara por su protocolo nativo (puerto 34567, el de iCSee) con el usuario y la
+  contraseña de iCSee. El tope es el de cada cámara (30 fps en NTSC, 25 en PAL); si a esa resolución admite menos,
+  la cámara lo recorta y el diálogo te muestra lo que aceptó de verdad. «Fluidez (FPS)» sigue limitando lo que se
+  dibuja en pantalla.
 - **Arrastrar** una cámara sobre otra las intercambia. **Doble clic** maximiza (Esc para volver). **F11** pantalla completa.
 
 ## Configuración
@@ -24,11 +30,13 @@ En **Releases → «Última versión (automática)»** están siempre los archiv
 Claves útiles: `fps_grid`, `fit_mode`, `perf_opacity`, `perf_interval`, `hwaccel`.
 
 ## Compilar (GitHub Actions)
-- `build-win81.yml` → instalador + portable de Windows (PyQt5 + PyAV 12).
-- `linux.yml` → `.tar.gz` y `.deb` de Linux (PyQt5 + PyAV 14). El `.deb` se instala en un Debian 12 limpio
+Todo está en `build.yml`:
+- Windows → instalador + portable (PyQt5 + PyAV 12).
+- Linux → `.tar.gz` y `.deb` (PyQt5 + PyAV 14). El `.deb` se instala en un Debian 12 limpio
   para comprobar que no falta ninguna dependencia.
-Con un tag `vX.Y.Z` los archivos se adjuntan solos al Release. Ambos hacen un autodiagnóstico del programa
-compilado y se ponen en rojo si algo no abre.
+- Cada subida a la rama principal **actualiza el Release `vX.Y.Z`** (la versión de `version.py`) con los
+  archivos nuevos de Windows y Linux. Para sacar una versión nueva, cambia `VERSION` en `version.py`.
+Ambas compilaciones hacen un autodiagnóstico del programa y se ponen en rojo si algo no abre.
 
 ## Desde el código fuente
 `pip install -r requirements.txt` (PyQt6) y `python main.py`. Linux: `requirements-linux.txt`.

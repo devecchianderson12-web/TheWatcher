@@ -208,6 +208,7 @@ class VideoWidget(QWidget):
         show.setCheckable(True)
         show.setChecked(bool(self.app.cfg.get("show_fps")))
         show.triggered.connect(lambda _=False: self.app.toggle_show_fps())
+        menu.addAction("FPS de la cámara (hasta su máximo)…", lambda: self.app.camera_fps(self.cam))
         pmenu = menu.addMenu("Monitor de rendimiento")
         pshow = pmenu.addAction("Mostrar")
         pshow.setCheckable(True)
@@ -387,7 +388,8 @@ class PerfBadge(QWidget):
 class CamerasDialog(QDialog):
     FIELDS = [("name", "Nombre"), ("ip", "IP"), ("port", "Puerto"), ("user", "Usuario"),
               ("password", "Contraseña"), ("channel", "Canal"),
-              ("url_sub", "URL Transmisión (opcional)"), ("url_main", "URL Convencional (opcional)")]
+              ("url_sub", "URL Transmisión (opcional)"), ("url_main", "URL Convencional (opcional)"),
+              ("ctrl_user", "Usuario iCSee (para FPS)"), ("ctrl_password", "Contraseña iCSee (para FPS)")]
 
     def __init__(self, cams, parent=None):
         super().__init__(parent)
@@ -410,7 +412,7 @@ class CamerasDialog(QDialog):
         self.edits = {}
         for key, label in self.FIELDS:
             ed = QLineEdit()
-            if key == "password":
+            if key in ("password", "ctrl_password"):
                 ed.setEchoMode(QLineEdit.EchoMode.Password)
             ed.textEdited.connect(lambda t, k=key: self._commit(k, t))
             self.edits[key] = ed
@@ -470,7 +472,7 @@ class CamerasDialog(QDialog):
     def result_cams(self):
         for c in self.cams:                      # limpia vacíos y tipos
             c.setdefault("id", uuid.uuid4().hex[:8])
-            for k in ("url_sub", "url_main"):
+            for k in ("url_sub", "url_main", "ctrl_user", "ctrl_password"):
                 if not c.get(k):
                     c.pop(k, None)
             for k, d in (("port", 554), ("channel", 1)):

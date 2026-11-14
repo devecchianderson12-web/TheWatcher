@@ -1,43 +1,263 @@
-name: Build Windows EXE
+name: Build The Watcher (Windows + Linux + Release)
 
-on: [push, workflow_dispatch]
+# Cada subida compila Windows y Linux y prueba que abran.
+# En la rama principal, además, actualiza el Release «vX.Y.Z» (versión de version.py)
+# con los archivos nuevos. Para sacar una versión nueva: cambia VERSION en version.py.
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build:
-    runs-on: windows-latest
+  version:
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        name: Leer la versión de version.py
+        run: |
+          V="$(python3 -c 'from version import VERSION; print(VERSION)')"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Versión: $V"
+
+  windows:
+    needs: version
+    runs-on: windows-2022
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-          cache: pip
+          python-version: "3.11"
 
-      - name: Instalar dependencias
+      - name: Instalar dependencias (PyQt5 + PyAV 12, compatibles con Windows 8.1)
         shell: pwsh
-        run: python -m pip install -r requirements.txt pyinstaller
+        run: python -m pip install -r requirements-win81.txt pyinstaller==6.10.0
 
-      - name: Compilar exe
+      - name: Compilar (carpeta con todo incluido)
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean --onefile --windowed --name ICSeeLite `
+          pyinstaller --noconfirm --clean --onedir --windowed --name TheWatcher `
+            --icon assets/watcher.ico `
+            --add-data "assets;assets" `
             --collect-all av `
             --exclude-module tkinter `
-            --exclude-module PyQt6.QtNetwork --exclude-module PyQt6.QtQml `
-            --exclude-module PyQt6.QtQuick --exclude-module PyQt6.QtWebEngineCore `
-            --exclude-module PyQt6.QtSql --exclude-module PyQt6.QtMultimedia `
+            --exclude-module PyQt5.QtWebEngineCore --exclude-module PyQt5.QtWebEngineWidgets `
+            --exclude-module PyQt5.QtQml --exclude-module PyQt5.QtQuick `
+            --exclude-module PyQt5.QtSql --exclude-module PyQt5.QtMultimedia `
             main.py
+
+      - name: Incluir runtimes de Microsoft dentro de la app (UCRT + VC++)
+        shell: pwsh
+        run: |
+          $dist = "dist\TheWatcher"
+          $targets = @($dist)
+          if (Test-Path "$dist\_internal") { $targets += "$dist\_internal" }
+          $ucrt = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Redist" -Recurse -Filter ucrtbase.dll -ErrorAction SilentlyContinue |
+                  Where-Object { $_.FullName -match '\\ucrt\\DLLs\\x64\\' } | Select-Object -First 1
+          if (-not $ucrt) { throw "No se encontró el UCRT redistribuible del SDK de Windows" }
+          foreach ($t in $targets) { Copy-Item "$($ucrt.DirectoryName)\*.dll" $t -Force }
+          $sys = "$env:SystemRoot\System32"
+          foreach ($n in "vcruntime140.dll","vcruntime140_1.dll","msvcp140.dll","msvcp140_1.dll","msvcp140_2.dll","concrt140.dll") {
+            if (Test-Path "$sys\$n") {
+              foreach ($t in $targets) { if (-not (Test-Path "$t\$n")) { Copy-Item "$sys\$n" $t } }
+            }
+          }
+
+      - name: Autodiagnóstico del programa compilado
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\TheWatcher\TheWatcher.exe" -ArgumentList @("--selftest", "$PWD\selftest.txt") -PassThru
+          if (-not $p.WaitForExit(180000)) { $p.Kill(); throw "selftest: tiempo agotado" }
+          if (Test-Path selftest.txt) { Get-Content selftest.txt } else { Write-Host "(sin informe)" }
+          if ($p.ExitCode -ne 0) { throw "El autodiagnóstico falló (código $($p.ExitCode))" }
+
+      - name: Revisar APIs que no existen en Windows 8.1 (informativo)
+        continue-on-error: true
+        shell: pwsh
+        run: python tools/scan_win81.py dist/TheWatcher
+
+      - name: Crear instalador (Inno Setup)
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { $iscc = (Get-ChildItem "$env:ProgramFiles*" -Recurse -Filter ISCC.exe -ErrorAction SilentlyContinue | Select-Object -First 1).FullName }
+          & $iscc "/DMyAppVersion=$env:VERSION" installer\TheWatcher.iss
+          if ($LASTEXITCODE -ne 0) { throw "Falló la creación del instalador" }
+
+      - name: Paquete portable (sin instalar)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory portable | Out-Null
+          Copy-Item dist\TheWatcher portable\TheWatcher -Recurse
+          New-Item portable\TheWatcher\portable.flag -ItemType File | Out-Null
+          Compress-Archive -Path portable\TheWatcher -DestinationPath TheWatcher-Win81-portable.zip
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ICSeeLite-win64
-          path: dist/ICSeeLite.exe
+          name: TheWatcher-Windows
+          path: |
+            installer_out/TheWatcher-Setup-Win81.exe
+            TheWatcher-Win81-portable.zip
+          if-no-files-found: error
 
-      - name: Publicar release (solo con tags v*)
-        if: startsWith(github.ref, 'refs/tags/v')
+  linux:
+    needs: version
+    runs-on: ubuntu-22.04
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Librerías del sistema que necesita Qt (para compilar y probar)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgl1 libegl1 libdbus-1-3 libfontconfig1 libglib2.0-0 \
+            libxkbcommon0 libxkbcommon-x11-0 libxcb-xinerama0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xkb1 libxcb-cursor0 libxcb-xfixes0 \
+            libxcb-sync1 libxcb-shm0
+
+      - name: Instalar dependencias
+        run: python -m pip install -r requirements-linux.txt pyinstaller==6.10.0
+
+      - name: Compilar (carpeta con todo incluido)
+        run: |
+          pyinstaller --noconfirm --clean --onedir --name TheWatcher \
+            --add-data "assets:assets" \
+            --collect-all av \
+            --exclude-module tkinter \
+            --exclude-module PyQt5.QtWebEngineCore --exclude-module PyQt5.QtWebEngineWidgets \
+            --exclude-module PyQt5.QtQml --exclude-module PyQt5.QtQuick \
+            --exclude-module PyQt5.QtSql --exclude-module PyQt5.QtMultimedia \
+            main.py
+
+      - name: Autodiagnóstico del programa compilado
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          if ! timeout 180 ./dist/TheWatcher/TheWatcher --selftest "$PWD/selftest.txt"; then
+            echo "El autodiagnóstico falló"; cat selftest.txt || true; exit 1
+          fi
+          cat selftest.txt
+
+      - name: Empaquetar .tar.gz
+        run: |
+          mkdir pkg
+          cp -r dist/TheWatcher pkg/TheWatcher
+          cp linux/install.sh linux/uninstall.sh linux/LEEME.txt assets/watcher.png pkg/TheWatcher/
+          chmod +x pkg/TheWatcher/install.sh pkg/TheWatcher/uninstall.sh pkg/TheWatcher/TheWatcher
+          tar -czf TheWatcher-Linux-x86_64.tar.gz -C pkg TheWatcher
+
+      - name: Crear paquete .deb (Debian / Ubuntu / antiX / Mint)
+        run: |
+          bash linux/make_deb.sh "$VERSION" dist/TheWatcher "thewatcher_${VERSION}_amd64.deb"
+          dpkg-deb -I "thewatcher_${VERSION}_amd64.deb"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TheWatcher-Linux
+          path: |
+            thewatcher_*_amd64.deb
+            TheWatcher-Linux-x86_64.tar.gz
+          if-no-files-found: error
+
+  # Instala el .deb en un Debian 12 limpio (la base de antiX 23) y comprueba que abre.
+  verify-deb:
+    needs: linux
+    runs-on: ubuntu-22.04
+    container: debian:12
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: TheWatcher-Linux
+          path: pkg
+
+      - name: Instalar el .deb con apt (resuelve las dependencias solo)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends fonts-dejavu-core
+          apt-get install -y ./pkg/thewatcher_*_amd64.deb
+
+      - name: Comprobar que no falta ninguna librería de Qt
+        run: |
+          QXCB="$(find /opt/thewatcher -name libqxcb.so | head -n 1)"
+          test -n "$QXCB"
+          MISSING="$(LD_LIBRARY_PATH="$(dirname "$QXCB")/../../lib:/opt/thewatcher/_internal" ldd "$QXCB" | grep 'not found' || true)"
+          if [ -n "$MISSING" ]; then
+            echo "El .deb no declara estas dependencias:"; echo "$MISSING"; exit 1
+          fi
+
+      - name: Autodiagnóstico desde el paquete instalado
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          if ! thewatcher --selftest /tmp/selftest.txt; then
+            echo "El autodiagnóstico falló"; cat /tmp/selftest.txt || true; exit 1
+          fi
+          cat /tmp/selftest.txt
+
+      - name: Desinstalar sin dejar restos
+        run: |
+          apt-get remove -y thewatcher
+          test ! -e /opt/thewatcher
+          test ! -e /usr/bin/thewatcher
+
+  # Solo en la rama principal: crea o actualiza el Release de la versión actual.
+  release:
+    if: github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch
+    needs: [version, windows, linux, verify-deb]
+    runs-on: ubuntu-22.04
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Mover el tag de la versión a esta subida
+        run: |
+          git tag -f "v$VERSION" "$GITHUB_SHA"
+          git push -f origin "refs/tags/v$VERSION"
+          ls -lh out
+
+      - name: Publicar en el Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/ICSeeLite.exe
+          tag_name: v${{ env.VERSION }}
+          name: The Watcher ${{ env.VERSION }}
+          make_latest: "true"
+          overwrite_files: true
+          body: |
+            Compilado automáticamente de la última subida (`${{ github.sha }}`).
+
+            **Windows 8.1 / 10 / 11 (64 bits)**
+            - `TheWatcher-Setup-Win81.exe`: instalador
+            - `TheWatcher-Win81-portable.zip`: sin instalar
+
+            **Linux x86_64 (Debian 12+, Ubuntu 22.04+, antiX 23+)**
+            - `thewatcher_${{ env.VERSION }}_amd64.deb`: `sudo apt install ./thewatcher_${{ env.VERSION }}_amd64.deb`
+            - `TheWatcher-Linux-x86_64.tar.gz`: cualquier distribución (`./install.sh`)
+          files: |
+            out/TheWatcher-Setup-Win81.exe
+            out/TheWatcher-Win81-portable.zip
+            out/thewatcher_*_amd64.deb
+            out/TheWatcher-Linux-x86_64.tar.gz
