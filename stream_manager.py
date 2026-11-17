@@ -11,6 +11,20 @@ except Exception:  # versión de PyAV sin soporte hwaccel
     HWAccel = None
 
 _FFERR = getattr(av.error, "FFmpegError", Exception)
+OPEN_TIMEOUT, READ_TIMEOUT = 20.0, 20.0   # por Wi-Fi débil la cámara se traba hasta 8 s: con 8 s de margen reconectaba sin parar
+
+
+def _reason(err):
+    """Motivo corto del corte para mostrar en pantalla (sin el texto del error: trae la URL con la contraseña)."""
+    if err is None:
+        return "se cortó"
+    if isinstance(err, getattr(av.error, "HTTPUnauthorizedError", ())) or "401" in str(err):
+        return "usuario o contraseña incorrectos"
+    if isinstance(err, (getattr(av.error, "ExitError", ()), TimeoutError)) or "timed out" in str(err).lower():
+        return "la cámara no responde"
+    if isinstance(err, ConnectionRefusedError):
+        return "conexión rechazada"
+    return type(err).__name__
 
 QUALITY_SUB = "Transmisión"    # substream: fluido, baja resolución
 QUALITY_MAIN = "Convencional"  # mainstream: alta definición
@@ -136,17 +150,17 @@ class CameraWorker(threading.Thread):
                 self._stop.wait(0.2)
                 continue
             self._reload.clear()
-            got = False
+            got, err = False, None
             try:
                 got = self._session(build_url(self.cam, self.quality, self.template))
-            except Exception:
-                pass
+            except Exception as e:
+                err = e
             if self._stop.is_set():
                 break
             if self._reload.is_set() or self._paused:
                 backoff = 1.0
                 continue
-            self.on_status("Sin señal · reconectando…")
+            self.on_status(f"Sin señal · {_reason(err)} · reconectando…")
             backoff = 1.0 if got else min(backoff * 2, 15.0)
             self._reload.wait(backoff)
 
@@ -154,15 +168,16 @@ class CameraWorker(threading.Thread):
         sub = self.quality == QUALITY_SUB
         self.on_status("Conectando…")
         options = {"rtsp_transport": "tcp", "fflags": "nobuffer+discardcorrupt",
-                   "flags": "low_delay", "max_delay": "500000"}
+                   "flags": "low_delay", "max_delay": "500000",
+                   "analyzeduration": "2000000"}          # analiza 2 s (no 5): abre antes
         kwargs = {}
         hw_name = _pick_hw() if self.use_hw else None
         if hw_name:
             kwargs["hwaccel"] = HWAccel(device_type=hw_name, allow_software_fallback=True)
         try:
-            container = av.open(url, options=options, timeout=(8.0, 8.0), **kwargs)
+            container = av.open(url, options=options, timeout=(OPEN_TIMEOUT, READ_TIMEOUT), **kwargs)
         except TypeError:                       # PyAV sin parámetro hwaccel
-            container = av.open(url, options=options, timeout=(8.0, 8.0))
+            container = av.open(url, options=options, timeout=(OPEN_TIMEOUT, READ_TIMEOUT))
         got = False
         wait_key = 0.0                           # tras un error se espera un cuadro clave (sin manchas grises),
                                                  # como mucho 4 s por si la cámara no marca los cuadros clave

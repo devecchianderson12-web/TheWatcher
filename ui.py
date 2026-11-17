@@ -208,7 +208,7 @@ class VideoWidget(QWidget):
         show.setCheckable(True)
         show.setChecked(bool(self.app.cfg.get("show_fps")))
         show.triggered.connect(lambda _=False: self.app.toggle_show_fps())
-        menu.addAction("FPS de la cámara (hasta su máximo)…", lambda: self.app.camera_fps(self.cam))
+        menu.addAction("FPS de la cámara (máx. 15)…", lambda: self.app.camera_fps(self.cam))
         pmenu = menu.addMenu("Monitor de rendimiento")
         pshow = pmenu.addAction("Mostrar")
         pshow.setCheckable(True)

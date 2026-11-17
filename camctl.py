@@ -10,6 +10,7 @@ PORT = 34567
 LOGIN, CONFIG_SET, CONFIG_GET = 1000, 1040, 1042
 OK = (100, 515)                 # 515 = correcto, pero la cámara pide reiniciar
 STREAMS = (("MainFormat", "Convencional"), ("ExtraFormat", "Transmisión"))
+LIMIT = 15                      # tope propio: más FPS satura el Wi-Fi de las cámaras y se cortan
 
 
 class CamError(Exception):
@@ -94,17 +95,15 @@ class Cam:
 
 
 def _max_fps(cam):
-    """Máximo de FPS de la cámara: 25 en PAL, 30 en NTSC; si no se sabe, 30
-    (la cámara recorta solo lo que no admite y releemos el valor real)."""
+    """Máximo de FPS: el de la cámara (25 en PAL, 30 en NTSC; si no se sabe, 30) con tope en LIMIT."""
+    top = 30
     try:
         fmt = (cam.get("General.Location") or {}).get("VideoFormat", "")
         if fmt.upper() == "PAL":
-            return 25
-        if fmt.upper() == "NTSC":
-            return 30
+            top = 25
     except CamError:
         pass
-    return 30
+    return min(top, LIMIT)
 
 
 def _streams(encode):

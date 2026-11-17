@@ -18,9 +18,9 @@ En **Releases → «The Watcher X.Y.Z»** (el marcado como *Latest*) están siem
   *Pantalla completa*, *Cámaras*.
 - **Clic derecho en una cámara:** Transmisión / Convencional · Resolución · Ajuste de imagen · Fluidez (FPS) ·
   Monitor de rendimiento (opacidad, actualización) · Pantalla completa · Personalizar cuadrícula · Cámaras.
-- **FPS de la cámara (hasta su máximo)…** (clic derecho): cambia los cuadros que **graba la cámara**, no solo los
+- **FPS de la cámara (máx. 15)…** (clic derecho): cambia los cuadros que **graba la cámara**, no solo los
   que se muestran. Habla con la cámara por su protocolo nativo (puerto 34567, el de iCSee) con el usuario y la
-  contraseña de iCSee. El tope es el de cada cámara (30 fps en NTSC, 25 en PAL); si a esa resolución admite menos,
+  contraseña de iCSee. El tope es 15 fps (más satura el Wi-Fi de las cámaras); si a esa resolución admite menos,
   la cámara lo recorta y el diálogo te muestra lo que aceptó de verdad. «Fluidez (FPS)» sigue limitando lo que se
   dibuja en pantalla.
 - **Arrastrar** una cámara sobre otra las intercambia. **Doble clic** maximiza (Esc para volver). **F11** pantalla completa.
