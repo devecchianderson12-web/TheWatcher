@@ -25,6 +25,8 @@ for s in 48 64 128 256; do
 done
 install -m 644 "$(icon_for 48)" "$STAGE/usr/share/pixmaps/thewatcher.png"   # menús antiguos (IceWM, JWM...)
 
+install -D -m 755 "$HERE/deb/thewatcher-wifi" "$STAGE/usr/libexec/thewatcher-wifi"
+install -D -m 644 "$HERE/deb/60-thewatcher-wifi.rules" "$STAGE/usr/lib/udev/rules.d/60-thewatcher-wifi.rules"
 install -m 755 "$HERE/deb/postinst" "$STAGE/DEBIAN/postinst"
 install -m 755 "$HERE/deb/postrm" "$STAGE/DEBIAN/postrm"
 SIZE="$(du -sk "$STAGE" | cut -f1)"

@@ -1,0 +1,14 @@
+#!/bin/sh
+# Apaga el ahorro de energía del Wi-Fi. Con él activo el adaptador se «duerme» entre paquetes
+# y el video de las cámaras llega a tirones, se corta y se reconecta sin parar.
+# Uso: thewatcher-wifi [interfaz]   (sin interfaz: todas las inalámbricas)
+for d in ${1:-$(ls /sys/class/net)}; do
+    [ -d "/sys/class/net/$d/wireless" ] || [ -e "/sys/class/net/$d/phy80211" ] || continue
+    for c in /usr/sbin/iw /sbin/iw; do
+        [ -x "$c" ] && { "$c" dev "$d" set power_save off 2>/dev/null; break; }
+    done
+    for c in /usr/sbin/iwconfig /sbin/iwconfig; do            # drivers viejos (p. ej. Broadcom «wl»)
+        [ -x "$c" ] && { "$c" "$d" power off 2>/dev/null; break; }
+    done
+done
+exit 0

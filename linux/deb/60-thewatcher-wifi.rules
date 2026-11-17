@@ -1,0 +1,2 @@
+# The Watcher: Wi-Fi sin ahorro de energía para que el video de las cámaras no se corte
+ACTION=="add", SUBSYSTEM=="net", RUN+="/usr/libexec/thewatcher-wifi %k"

@@ -153,7 +153,7 @@ class CameraWorker(threading.Thread):
     def _session(self, url) -> bool:
         sub = self.quality == QUALITY_SUB
         self.on_status("Conectando…")
-        options = {"rtsp_transport": "tcp", "fflags": "nobuffer",
+        options = {"rtsp_transport": "tcp", "fflags": "nobuffer+discardcorrupt",
                    "flags": "low_delay", "max_delay": "500000"}
         kwargs = {}
         hw_name = _pick_hw() if self.use_hw else None
@@ -164,6 +164,8 @@ class CameraWorker(threading.Thread):
         except TypeError:                       # PyAV sin parámetro hwaccel
             container = av.open(url, options=options, timeout=(8.0, 8.0))
         got = False
+        wait_key = 0.0                           # tras un error se espera un cuadro clave (sin manchas grises),
+                                                 # como mucho 4 s por si la cámara no marca los cuadros clave
         pacer = Pacer()
         try:
             vs = container.streams.video[0]
@@ -182,8 +184,16 @@ class CameraWorker(threading.Thread):
                     if hw_name and not got:      # la GPU no pudo: reintenta en CPU
                         self.use_hw = False
                         return False
+                    wait_key = wait_key or time.monotonic() + 4.0
                     continue
                 for frame in frames:
+                    if getattr(frame, "is_corrupt", False):
+                        wait_key = wait_key or time.monotonic() + 4.0
+                        continue
+                    if wait_key:
+                        if not frame.key_frame and time.monotonic() < wait_key:
+                            continue
+                        wait_key = 0.0
                     if not pacer.accept(time.monotonic(), self.fps):
                         continue                 # descarta sin convertir = ahorra CPU
                     w, h = out_size(self.fit_mode, frame.width, frame.height, *self.target, self.max_h)
