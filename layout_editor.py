@@ -5,9 +5,12 @@ from qt import (QComboBox, QDialog, QDialogButtonBox, QGridLayout, QHBoxLayout, 
                QSpinBox, QVBoxLayout, QWidget)
 
 import layout as L
+import theme
 
-STYLE = ("QPushButton{background:#1c1c1c;color:#ddd;border:1px solid #555;}"
-         "QPushButton:checked{background:#1f5fbf;border:2px solid #8ec0ff;color:white;}")
+STYLE = (f"QPushButton{{background:{theme.TILE};color:{theme.TEXT};border:1px solid {theme.BORDER};"
+         f"border-radius:{theme.RADIUS}px;}}"
+         f"QPushButton:hover{{background:{theme.RAISED};}}"
+         f"QPushButton:checked{{background:{theme.ACCENT};border:2px solid {theme.ACCENT_HOVER};color:white;}}")
 
 
 class LayoutDialog(QDialog):

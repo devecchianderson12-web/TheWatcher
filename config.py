@@ -19,6 +19,9 @@ DEFAULTS = {
     "perf_monitor": True,         # CPU / RAM / GPU arriba al centro
     "perf_opacity": 0.85,         # 0.1 (casi invisible) a 1.0 (opaco)
     "perf_interval": 2.0,         # segundos entre mediciones (más = menos CPU)
+    "perf_items": ["cpu", "ram", "gpu"],   # qué muestra: cpu, ram, gpu, net (tráfico de red)
+    "perf_net_unit": "auto_B",    # auto_B / auto_b (bytes o bits automático), KB, MB, Kb, Mb, Gb
+    "perf_net_dir": "both",       # both | down | up
     "layout_mode": "grid",        # grid | focus | pano | custom
     "layout": None,               # None = cuadrícula automática; ver layout.py
 }

@@ -17,7 +17,11 @@ En **Releases → «The Watcher X.Y.Z»** (el marcado como *Latest*) están siem
 - **Barra inferior:** vistas *Cuadrícula / Destacada / Panorámica / Mi planilla*, *Buscar ONVIF*, *Buscar en red*,
   *Pantalla completa*, *Cámaras*.
 - **Clic derecho en una cámara:** Transmisión / Convencional · Resolución · Ajuste de imagen · Fluidez (FPS) ·
-  Monitor de rendimiento (opacidad, actualización) · Pantalla completa · Personalizar cuadrícula · Cámaras.
+  Monitor de rendimiento · Pantalla completa · Personalizar cuadrícula · Cámaras.
+- **Monitor de rendimiento** (la pastilla de arriba al centro): un clic abre su menú para elegir qué mostrar
+  (**CPU, RAM, GPU, tráfico de red**), la unidad de la red (automático en bytes o en bits, KB/s, MB/s, Kbps,
+  Mbps, Gbps), si se ve la bajada, la subida o ambas, la opacidad y cada cuánto se actualiza. La red suma las
+  placas físicas (Wi-Fi interna, adaptador USB, Ethernet).
 - **FPS de la cámara (máx. 15)…** (clic derecho): cambia los cuadros que **graba la cámara**, no solo los
   que se muestran. Habla con la cámara por su protocolo nativo (puerto 34567, el de iCSee) con el usuario y la
   contraseña de iCSee. El tope es 15 fps (más satura el Wi-Fi de las cámaras); si a esa resolución admite menos,
@@ -27,6 +31,7 @@ En **Releases → «The Watcher X.Y.Z»** (el marcado como *Latest*) están siem
   un cartel abajo a la derecha con **Actualizar**: la descarga, reemplaza la vieja (sin dejar copias) y se
   vuelve a abrir. Si algo falla muestra el motivo y **Reintentar**; nunca queda trabado. En Linux con el `.deb`
   la instala el sistema (tarda hasta 1 minuto en empezar); en Windows con instalador pide permiso de administrador.
+- **Aspecto:** tema oscuro azul grisáceo con bordes redondeados en cámaras, barra, menús, botones y ventanas.
 - **Arrastrar** una cámara sobre otra las intercambia. **Doble clic** maximiza (Esc para volver). **F11** pantalla completa.
 
 ## Configuración

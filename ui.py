@@ -4,10 +4,11 @@ import uuid
 import time
 
 from qt import (event_pos, pyqtSignal, QAction, QActionGroup, QApplication, QByteArray, QColor,
-               QDialog, QDialogButtonBox, QDrag, qexec, QFormLayout, QHBoxLayout, QImage, QLineEdit,
-               QListWidget, QMenu, QMimeData, QObject, QPainter, QPen, QPixmap, QPushButton, QRect, QRectF,
-               Qt, QTimer, QVBoxLayout, QWidget)
+               QDialog, QDialogButtonBox, QDrag, qexec, QFontMetrics, QFormLayout, QHBoxLayout, QImage,
+               QLineEdit, QListWidget, QMenu, QMimeData, QObject, QPainter, QPainterPath, QPen, QPixmap,
+               QPoint, QPushButton, QRect, QRectF, Qt, QVBoxLayout, QWidget)
 
+import theme
 from stream_manager import QUALITIES, QUALITY_SUB, CameraWorker, cover_crop, fit_rect
 from sysmon import SysMonitor
 
@@ -19,6 +20,125 @@ FPS_OPTIONS = ((8, "8 fps (ahorra CPU)"), (12, "12 fps"), (15, "15 fps"), (20, "
 FIT_OPTIONS = (("stretch", "Estirar (sin barras negras)"), ("fill", "Llenar (recorta los bordes)"),
                ("fit", "Original (con barras negras)"))
 RES_OPTIONS = ((0, "Automática"), (720, "720p"), (480, "480p"), (360, "360p"), (240, "240p"))
+PERF_ITEMS = (("cpu", "CPU"), ("ram", "RAM"), ("gpu", "GPU"), ("net", "Tráfico de red"))
+PERF_DEFAULT_ITEMS = ("cpu", "ram", "gpu")
+NET_UNITS = (("auto_B", "Automático en bytes (KB/s · MB/s)"), ("auto_b", "Automático en bits (Kbps · Mbps)"),
+             ("KB", "Kilobytes (KB/s)"), ("MB", "Megabytes (MB/s)"),
+             ("Kb", "Kilobits (Kbps)"), ("Mb", "Megabits (Mbps)"), ("Gb", "Gigabits (Gbps)"))
+NET_DIRS = (("both", "Bajada y subida"), ("down", "Solo bajada"), ("up", "Solo subida"))
+
+
+def perf_items(cfg):
+    """Qué muestra el monitor, en orden fijo; nunca vacío."""
+    raw = cfg.get("perf_items")
+    keys = [k for k, _ in PERF_ITEMS if isinstance(raw, (list, tuple)) and k in raw]
+    return keys or list(PERF_DEFAULT_ITEMS)
+
+
+def fmt_rate(bps, unit):
+    """bytes/s -> «1.2 MB/s». Bytes en base 1024 (como Windows); bits en base 1000 (como los routers)."""
+    if unit in ("auto_b", "Kb", "Mb", "Gb"):
+        v, base, names = bps * 8.0, 1000.0, ("bps", "Kbps", "Mbps", "Gbps")
+        fixed = {"Kb": 1, "Mb": 2, "Gb": 3}.get(unit)
+    else:
+        v, base, names = float(bps), 1024.0, ("B/s", "KB/s", "MB/s", "GB/s")
+        fixed = {"KB": 1, "MB": 2}.get(unit)
+    if fixed is None:
+        i = 0
+        while v >= base and i < 3:
+            v, i = v / base, i + 1
+    else:
+        v, i = v / base ** fixed, fixed
+    return (f"{v:.1f}" if v < 10 else f"{v:.0f}") + " " + names[i]
+
+
+def fill_perf_menu(pmenu, app, show_toggle=True):
+    """Menú del monitor de rendimiento (desde la pastilla o desde el clic derecho de una cámara)."""
+    cfg = app.cfg
+    if show_toggle:
+        pshow = pmenu.addAction("Mostrar el monitor")
+        pshow.setCheckable(True)
+        pshow.setChecked(bool(cfg.get("perf_monitor", True)))
+        pshow.triggered.connect(lambda _=False: app.toggle_perf())
+        pmenu.addSeparator()
+    sec = pmenu.addAction("Qué mostrar")
+    sec.setEnabled(False)
+    items = perf_items(cfg)
+    for key, label in PERF_ITEMS:
+        act = pmenu.addAction(label)
+        act.setCheckable(True)
+        act.setChecked(key in items)
+        act.setEnabled(not (key in items and len(items) == 1))     # siempre queda al menos uno
+        act.triggered.connect(lambda on=False, k=key: app.set_perf_item(k, on))
+    unit_now = cfg.get("perf_net_unit", "auto_B")
+    umenu = pmenu.addMenu("Unidad del tráfico de red")
+    ugroup = QActionGroup(umenu)
+    ugroup.setExclusive(True)
+    for u, label in NET_UNITS:
+        uact = QAction(label, umenu)
+        uact.setCheckable(True)
+        uact.setChecked(u == unit_now)
+        uact.triggered.connect(lambda _=False, u=u: app.set_perf_net(unit=u))
+        ugroup.addAction(uact)
+        umenu.addAction(uact)
+    dmenu = pmenu.addMenu("Dirección del tráfico")
+    dgroup = QActionGroup(dmenu)
+    dgroup.setExclusive(True)
+    for d, label in NET_DIRS:
+        dact = QAction(label, dmenu)
+        dact.setCheckable(True)
+        dact.setChecked(d == cfg.get("perf_net_dir", "both"))
+        dact.triggered.connect(lambda _=False, d=d: app.set_perf_net(direction=d))
+        dgroup.addAction(dact)
+        dmenu.addAction(dact)
+    pmenu.addSeparator()
+    op_now = float(cfg.get("perf_opacity", 0.85))
+    omenu = pmenu.addMenu(f"Opacidad ({op_now * 100:.0f} %)")
+    ogroup = QActionGroup(omenu)
+    ogroup.setExclusive(True)
+    for v, label in PERF_OPACITY:
+        oact = QAction(label, omenu)
+        oact.setCheckable(True)
+        oact.setChecked(abs(v - op_now) < 0.01)
+        oact.triggered.connect(lambda _=False, v=v: app.set_perf_opacity(v))
+        ogroup.addAction(oact)
+        omenu.addAction(oact)
+    omenu.addSeparator()
+    omenu.addAction("Aumentar (+10 %)", lambda: app.step_perf_opacity(0.1))
+    omenu.addAction("Disminuir (−10 %)", lambda: app.step_perf_opacity(-0.1))
+    imenu = pmenu.addMenu("Actualización")
+    igroup = QActionGroup(imenu)
+    igroup.setExclusive(True)
+    for secs, label in PERF_INTERVALS:
+        iact = QAction(label, imenu)
+        iact.setCheckable(True)
+        iact.setChecked(abs(secs - float(cfg.get("perf_interval", 2.0))) < 0.01)
+        iact.triggered.connect(lambda _=False, secs=secs: app.set_perf_interval(secs))
+        igroup.addAction(iact)
+        imenu.addAction(iact)
+    return pmenu
+
+
+def _corner_pixmaps(r, dpr, color):
+    """Las 4 esquinas «de afuera» de un rectángulo redondeado, pintadas del color del fondo.
+    Se dibujan encima del vídeo: redondea cada cámara con 4 copias diminutas por cuadro (casi gratis)."""
+    out = []
+    for corner in range(4):                                   # sup-izq, sup-der, inf-izq, inf-der
+        pm = QPixmap(int(r * dpr), int(r * dpr))
+        pm.setDevicePixelRatio(dpr)
+        pm.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        cx = r if corner in (0, 2) else 0
+        cy = r if corner in (0, 1) else 0
+        outside = QPainterPath()
+        outside.addRect(QRectF(0, 0, r, r))
+        circle = QPainterPath()
+        circle.addEllipse(QRectF(cx - r, cy - r, 2 * r, 2 * r))
+        p.fillPath(outside.subtracted(circle), color)
+        p.end()
+        out.append(pm)
+    return out
 
 
 class _Signals(QObject):
@@ -38,7 +158,7 @@ class VideoWidget(QWidget):
         f = self.font()
         f.setPointSize(9)
         self._font = f                                  # se crea una vez, no en cada repintado
-        self._label_key, self._label, self._label_w = None, "", 0
+        self._label_key, self._label_pm = None, None
         self._img = None
         self._arr = None
         self._pending = False                 # ya hay un fotograma esperando a ser dibujado
@@ -124,7 +244,7 @@ class VideoWidget(QWidget):
             pm = QPixmap.fromImage(self._img).scaledToWidth(180)
         else:
             pm = QPixmap(180, 100)
-            pm.fill(QColor(30, 30, 30))
+            pm.fill(theme.qc(theme.TILE))
         drag.setPixmap(pm)
         drag.setHotSpot(pm.rect().center())
         qexec(drag, Qt.DropAction.MoveAction)
@@ -209,35 +329,7 @@ class VideoWidget(QWidget):
         show.setChecked(bool(self.app.cfg.get("show_fps")))
         show.triggered.connect(lambda _=False: self.app.toggle_show_fps())
         menu.addAction("FPS de la cámara (máx. 15)…", lambda: self.app.camera_fps(self.cam))
-        pmenu = menu.addMenu("Monitor de rendimiento")
-        pshow = pmenu.addAction("Mostrar")
-        pshow.setCheckable(True)
-        pshow.setChecked(bool(self.app.cfg.get("perf_monitor", True)))
-        pshow.triggered.connect(lambda _=False: self.app.toggle_perf())
-        op_now = float(self.app.cfg.get("perf_opacity", 0.85))
-        omenu = pmenu.addMenu(f"Opacidad ({op_now * 100:.0f} %)")
-        ogroup = QActionGroup(omenu)
-        ogroup.setExclusive(True)
-        for v, label in PERF_OPACITY:
-            oact = QAction(label, omenu)
-            oact.setCheckable(True)
-            oact.setChecked(abs(v - op_now) < 0.01)
-            oact.triggered.connect(lambda _=False, v=v: self.app.set_perf_opacity(v))
-            ogroup.addAction(oact)
-            omenu.addAction(oact)
-        omenu.addSeparator()
-        omenu.addAction("Aumentar (+10 %)", lambda: self.app.step_perf_opacity(0.1))
-        omenu.addAction("Disminuir (−10 %)", lambda: self.app.step_perf_opacity(-0.1))
-        imenu = pmenu.addMenu("Actualización")
-        igroup = QActionGroup(imenu)
-        igroup.setExclusive(True)
-        for sec, label in PERF_INTERVALS:
-            iact = QAction(label, imenu)
-            iact.setCheckable(True)
-            iact.setChecked(abs(sec - float(self.app.cfg.get("perf_interval", 2.0))) < 0.01)
-            iact.triggered.connect(lambda _=False, sec=sec: self.app.set_perf_interval(sec))
-            igroup.addAction(iact)
-            imenu.addAction(iact)
+        fill_perf_menu(menu.addMenu("Monitor de rendimiento"), self.app)
         menu.addSeparator()
         if self.app.cfg.get("layout_mode") in ("focus", "pano"):
             menu.addAction("Hacer principal (la grande)", lambda: self.app.make_primary(self.cam))
@@ -247,12 +339,39 @@ class VideoWidget(QWidget):
         menu.addAction("Administrar cámaras…", self.app.manage_cameras)
         return menu
 
+    _corners = {}                                  # (dpr) -> pixmaps de las 4 esquinas (compartidos)
+    _TILE = None
+
+    def _corner_set(self, dpr):
+        cs = VideoWidget._corners.get(dpr)
+        if cs is None:
+            cs = VideoWidget._corners[dpr] = _corner_pixmaps(theme.TILE_RADIUS, dpr, theme.qc(theme.BG))
+        return cs
+
+    def _render_label(self, text, dpr):
+        w, h = QFontMetrics(self._font).horizontalAdvance(text) + 20, 22
+        pm = QPixmap(int(w * dpr), int(h * dpr))
+        pm.setDevicePixelRatio(dpr)
+        pm.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(theme.qc(theme.BG, 190))
+        p.drawRoundedRect(QRectF(0, 0, w, h), h / 2, h / 2)
+        p.setFont(self._font)
+        p.setPen(theme.qc(theme.TEXT))
+        p.drawText(QRect(0, 0, w, h), Qt.AlignmentFlag.AlignCenter, text)
+        p.end()
+        return pm
+
     def paintEvent(self, ev):
         p = QPainter(self)
         img = self._img
         mode = self.app.cfg.get("fit_mode", "stretch")
+        if VideoWidget._TILE is None:
+            VideoWidget._TILE = theme.qc(theme.TILE)
         if img is None or mode == "fit":                       # con «estirar/llenar» la imagen cubre todo:
-            p.fillRect(self.rect(), Qt.GlobalColor.black)      # no se pinta el fondo (menos trabajo por cuadro)
+            p.fillRect(self.rect(), VideoWidget._TILE)         # no se pinta el fondo (menos trabajo por cuadro)
         if img is not None:
             iw, ih, W, H = img.width(), img.height(), self.width(), self.height()
             if mode == "fit":                                  # proporción original, con barras
@@ -261,28 +380,36 @@ class VideoWidget(QWidget):
                 p.drawImage(QRect(0, 0, W, H), img, QRect(*cover_crop(iw, ih, W, H)))
             else:                                              # estirar: sin barras negras
                 p.drawImage(QRect(0, 0, W, H), img)
-        p.setFont(self._font)
         if self._status:
-            p.setPen(QColor(170, 170, 170))
+            p.setFont(self._font)
+            p.setPen(theme.qc(theme.MUTED))
             p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._status)
+        dpr = self.devicePixelRatioF()
         show = bool(self.app.cfg.get("show_fps") and self.fps_now)
         key = (self.cam.get("name"), self.worker.quality, self.worker.max_h,
-               round(self.fps_now) if show else None, round(self.worker.src_fps) if show else None)
-        if key != self._label_key:                             # texto y ancho solo se recalculan si cambian
+               round(self.fps_now) if show else None, round(self.worker.src_fps) if show else None, dpr)
+        if key != self._label_key:                             # la etiqueta solo se redibuja si cambia
             label = f"{self.cam.get('name', 'Cámara')}  ·  {self.worker.quality}"
             if self.worker.max_h:
                 label += f"  ·  {self.worker.max_h}p"
             if show:
                 src = self.worker.src_fps
                 label += f"  ·  {self.fps_now:.0f}" + (f"/{src:.0f}" if src else "") + " fps"
-            self._label_key, self._label = key, label
-            self._label_w = p.fontMetrics().horizontalAdvance(label) + 16
-        p.fillRect(0, 0, self._label_w, 20, QColor(0, 0, 0, 150))
-        p.setPen(QColor(225, 225, 225))
-        p.drawText(8, 14, self._label)
+            self._label_key, self._label_pm = key, self._render_label(label, dpr)
+        p.drawPixmap(8, 8, self._label_pm)
+        W, H = self.width(), self.height()
+        r = theme.TILE_RADIUS
+        if W > 2 * r and H > 2 * r:                            # esquinas redondeadas
+            tl, tr, bl, br = self._corner_set(dpr)
+            p.drawPixmap(0, 0, tl)
+            p.drawPixmap(W - r, 0, tr)
+            p.drawPixmap(0, H - r, bl)
+            p.drawPixmap(W - r, H - r, br)
         if self._drop:                            # resalta el destino mientras arrastras
-            p.setPen(QPen(QColor(110, 170, 255), 4))
-            p.drawRect(self.rect().adjusted(2, 2, -2, -2))
+            p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            p.setPen(QPen(theme.qc(theme.ACCENT), 3))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRoundedRect(QRectF(self.rect()).adjusted(1.5, 1.5, -1.5, -1.5), r, r)
 
 
 class _PerfSignals(QObject):
@@ -290,15 +417,17 @@ class _PerfSignals(QObject):
 
 
 class PerfBadge(QWidget):
-    """Pastilla redondeada arriba al centro con CPU / RAM / GPU del sistema.
+    """Pastilla redondeada arriba al centro: CPU / RAM / GPU / tráfico de red (lo que elijas).
+    Clic (izquierdo o derecho) = menú para elegir qué mostrar y en qué unidad.
     Pensada para gastar casi nada: no tiene temporizador propio (la muestra llega del hilo del monitor),
-    solo se redibuja si cambia algún número, y el dibujo se guarda en un pixmap, de modo que cada
+    solo se redibuja si cambia algún texto, y el dibujo se guarda en un pixmap, de modo que cada
     repintado (p. ej. cuando llega un cuadro de la cámara que está debajo) cuesta un único drawPixmap."""
-    LABELS = ("CPU", "RAM", "GPU")
+    H, PAD, GAP = 26, 12, 1
 
     def __init__(self, parent, opacity=0.85, interval=2.0):
         super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)   # no estorba los clics
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("Clic: elegir qué mostrar (CPU, RAM, GPU, red) y la unidad")
         f = self.font()
         f.setPointSize(9)
         f.setBold(True)
@@ -307,10 +436,12 @@ class PerfBadge(QWidget):
         self._sig.sample.connect(self._on_sample)
         self.mon = SysMonitor(on_sample=self._emit_sample, interval=interval)
         self._opacity = opacity
-        self._vals, self._texts = (0.0, 0.0, None), None
+        self.items, self.unit, self.direction = list(PERF_DEFAULT_ITEMS), "auto_B", "both"
+        self._vals, self._cells = (0.0, 0.0, None, None), None
+        self._widths = {}                           # ancho mínimo de cada celda (no «baila» con los números)
         self._pm, self._pm_dpr = None, 0.0
-        self._cell = self.fontMetrics().horizontalAdvance("CPU 100%") + 14
-        self.setFixedSize(self._cell * 3 + 18, 24)
+        self.menu_provider = None                   # función que llena el menú (la pone la ventana)
+        self._relayout()
         self.hide()
 
     def _emit_sample(self, vals):                     # se ejecuta en el hilo del monitor
@@ -330,6 +461,13 @@ class PerfBadge(QWidget):
             self.mon.stop()
             self.hide()
 
+    def configure(self, items, unit, direction):
+        self.items, self.unit, self.direction = list(items), unit, direction
+        self.mon.want_gpu = "gpu" in self.items
+        self._widths = {}
+        self._cells = None
+        self._on_sample(self._vals, force=True)
+
     def set_opacity(self, value):
         self._opacity = value
         self.update()
@@ -340,23 +478,70 @@ class PerfBadge(QWidget):
     def reposition(self):
         p = self.parentWidget()
         if p is not None:
-            self.move((p.width() - self.width()) // 2, 6)
+            self.move((p.width() - self.width()) // 2, 12)
 
-    def _on_sample(self, vals):
-        texts = tuple("n/d" if v is None else f"{v:.0f}%" for v in vals)
-        self._vals = vals
-        if texts == self._texts:                      # nada cambió: no se redibuja
-            return
-        self._texts = texts
-        self._pm = None                               # se regenera una sola vez al pintar
-        self.update()
-
+    # ---- textos ----
     @staticmethod
     def _color(v):
         if v is None:
-            return QColor(150, 150, 150)
+            return theme.qc(theme.MUTED)
         v = round(v)
-        return QColor(120, 220, 140) if v < 60 else QColor(255, 200, 80) if v < 85 else QColor(255, 100, 100)
+        return QColor(120, 220, 150) if v < 60 else QColor(255, 200, 90) if v < 85 else QColor(255, 110, 110)
+
+    def _net_text(self, net):
+        if net is None:
+            return "Red --"
+        rx, tx = net
+        parts = []
+        if self.direction in ("both", "down"):
+            parts.append("↓ " + fmt_rate(rx, self.unit))
+        if self.direction in ("both", "up"):
+            parts.append("↑ " + fmt_rate(tx, self.unit))
+        return "   ".join(parts)
+
+    def _make_cells(self, vals):
+        cpu, ram, gpu, net = vals
+        out = []
+        for key in self.items:
+            if key == "net":
+                out.append(("net", self._net_text(net), QColor(140, 190, 255)))
+            else:
+                v = {"cpu": cpu, "ram": ram, "gpu": gpu}[key]
+                t = "n/d" if v is None else f"{v:.0f}%"
+                out.append((key, f"{key.upper()} {t}", self._color(v)))
+        return tuple(out)
+
+    def _template(self, key):
+        if key != "net":
+            return f"{key.upper()} 100%"
+        sample = fmt_rate(999.0 * (1024 ** 2 if self.unit in ("auto_B", "KB", "MB") else 1e6 / 8), self.unit)
+        one = "↓ " + sample.replace("9", "8")
+        return one + "   " + one if self.direction == "both" else one
+
+    def _relayout(self):
+        fm = self.fontMetrics()
+        total = 0
+        for key in self.items:
+            w = max(self._widths.get(key, 0), fm.horizontalAdvance(self._template(key)) + 2 * self.PAD)
+            for k, t, _ in (self._cells or ()):
+                if k == key:
+                    w = max(w, fm.horizontalAdvance(t) + 2 * self.PAD)
+            self._widths[key] = w
+            total += w
+        total += 8 + self.GAP * max(0, len(self.items) - 1)
+        if total != self.width() or self.height() != self.H:
+            self.setFixedSize(total, self.H)
+            self.reposition()
+
+    def _on_sample(self, vals, force=False):
+        self._vals = vals
+        cells = self._make_cells(vals)
+        if cells == self._cells and not force:       # nada cambió: no se redibuja
+            return
+        self._cells = cells
+        self._relayout()
+        self._pm = None                               # se regenera una sola vez al pintar
+        self.update()
 
     def _render(self, dpr):
         w, h = self.width(), self.height()
@@ -365,14 +550,21 @@ class PerfBadge(QWidget):
         pm.fill(Qt.GlobalColor.transparent)
         p = QPainter(pm)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        p.setPen(QPen(QColor(255, 255, 255, 50), 1))
-        p.setBrush(QColor(10, 10, 14, 225))
+        p.setPen(QPen(theme.qc(theme.BORDER), 1))
+        p.setBrush(theme.qc(theme.PANEL))           # la transparencia la da la opacidad elegida
         p.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), h / 2, h / 2)    # bordes totalmente redondeados
         p.setFont(self.font())
-        texts = self._texts or ("--", "--", "--")
-        for i, (label, v, t) in enumerate(zip(self.LABELS, self._vals, texts)):
-            p.setPen(self._color(v))
-            p.drawText(QRect(9 + i * self._cell, 0, self._cell, h), Qt.AlignmentFlag.AlignCenter, f"{label} {t}")
+        x = 4
+        cells = self._cells or self._make_cells(self._vals)
+        for n, (key, text, color) in enumerate(cells):
+            cw = self._widths.get(key, 60)
+            if n:
+                p.setPen(QPen(theme.qc(theme.BORDER), 1))
+                p.drawLine(x, 7, x, h - 7)
+                x += self.GAP
+            p.setPen(color)
+            p.drawText(QRect(x, 0, cw, h), Qt.AlignmentFlag.AlignCenter, text)
+            x += cw
         p.end()
         self._pm, self._pm_dpr = pm, dpr
 
@@ -383,6 +575,29 @@ class PerfBadge(QWidget):
         p = QPainter(self)
         p.setOpacity(self._opacity)                   # opacidad de toda la pastilla
         p.drawPixmap(0, 0, self._pm)
+
+    # ---- menú ----
+    def build_menu(self):
+        menu = QMenu(self)
+        if self.menu_provider:
+            self.menu_provider(menu)
+        return menu
+
+    def _popup(self):
+        menu = self.build_menu()
+        if menu.actions():
+            qexec(menu, self.mapToGlobal(self.rect().bottomLeft()) + QPoint(0, 6))
+
+    def mousePressEvent(self, e):
+        if e.button() in (Qt.MouseButton.LeftButton, Qt.MouseButton.RightButton):
+            e.accept()
+            self._popup()
+
+    def mouseDoubleClickEvent(self, e):           # que no maximice la cámara de abajo
+        e.accept()
+
+    def contextMenuEvent(self, e):
+        e.accept()
 
 
 class CamerasDialog(QDialog):

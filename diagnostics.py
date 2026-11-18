@@ -76,7 +76,24 @@ def _gui_check():
     win.set_fps(12)
     win.toggle_show_fps()
     win.perf.set_active(True)                             # monitor: redondeado, opacidad e intervalo
-    win.perf._on_sample((12.0, 40.0, None))
+    win.perf._on_sample((12.0, 40.0, None, (1500000.0, 20000.0)))
+    import ui as UI
+    assert UI.fmt_rate(1536, "auto_B") == "1.5 KB/s" and UI.fmt_rate(125000, "auto_b") == "1.0 Mbps"
+    assert UI.fmt_rate(1048576 * 3, "KB") == "3072 KB/s" and UI.fmt_rate(0, "Mb") == "0.0 Mbps"
+    for key in ("net", "gpu"):                            # elegir qué se muestra (CPU/RAM/GPU/red)
+        win.set_perf_item(key, True)
+    for unit, _ in UI.NET_UNITS:
+        win.set_perf_net(unit=unit)
+        assert not win.perf.grab().isNull()
+    for d, _ in UI.NET_DIRS:
+        win.set_perf_net(direction=d)
+    for key in ("cpu", "ram", "gpu", "net"):               # nunca queda vacío
+        win.set_perf_item(key, False)
+    assert UI.perf_items(win.cfg) == ["net"]
+    win.set_perf_item("cpu", True)
+    assert win.perf.build_menu().actions()
+    win.cfg["perf_items"], win.cfg["perf_net_unit"], win.cfg["perf_net_dir"] = ["cpu", "ram", "gpu"], "auto_B", "both"
+    win._configure_perf()
     for op in (0.3, 1.0):
         win.set_perf_opacity(op)
         assert not win.perf.grab().isNull()
@@ -155,9 +172,11 @@ def report(deep=False):
         b = sysmon._make_backend()
         b.cpu()
         time.sleep(0.4)
-        c, r, g = b.cpu(), b.ram(), b.gpu()
+        b.net()
+        time.sleep(0.4)
+        c, r, g, n = b.cpu(), b.ram(), b.gpu(), b.net()
         add("Monitor", f"CPU {c:.0f}%  RAM {r:.0f}%  GPU " + (f"{g:.0f}%" if g is not None else "n/d")
-            + f"  [{b.gpu_source}]")
+            + f"  [{b.gpu_source}]  Red " + (f"↓{n[0] / 1024:.0f} ↑{n[1] / 1024:.0f} KB/s" if n else "n/d"))
         b.close()
     except Exception as e:                                # aviso, no es fatal
         add("Monitor", "AVISO " + repr(e))
@@ -187,8 +206,10 @@ def selftest(out_path):
 
 def show_report():
     import config
+    import theme
     from qt import QApplication, QMessageBox
     app = QApplication.instance() or QApplication(sys.argv)
+    theme.apply(app)
     text, ok = report(deep=False)
     path = os.path.join(config.data_dir(), "diagnostico.txt")
     try:

@@ -8,9 +8,10 @@
 import threading
 import time
 
-from qt import (pyqtSignal, QColor, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QObject, QPainter,
+from qt import (pyqtSignal, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QObject, QPainter,
                 QPainterPath, QPropertyAnimation, QPushButton, QRectF, Qt, QTimer, QVBoxLayout, QWidget)
 
+import theme
 import updater
 
 FIRST_CHECK_MS = 20_000              # primer chequeo, 20 s después de abrir
@@ -19,16 +20,16 @@ ERROR_HIDE_MS = 60_000               # un error se oculta solo al minuto
 DEB_WAIT_S = 4 * 60                  # el sistema tiene 4 min para empezar (corre cada minuto)
 DEB_INSTALL_S = 12 * 60              # y 12 min para terminar
 
-STYLE = """
-QLabel#title { color: #ffffff; font-weight: bold; }
-QLabel#text { color: #c8c8c8; }
-QPushButton#go { background: #1f5fbf; color: white; border: none; border-radius: 9px; padding: 6px 16px;
-                 font-weight: bold; }
-QPushButton#go:hover { background: #2a6fd6; }
-QPushButton#go:disabled { background: #2b3a52; color: #9fb3d1; }
-QPushButton#close { background: transparent; color: #9a9a9a; border: none; border-radius: 9px;
-                    font-size: 15px; padding: 0 6px; }
-QPushButton#close:hover { background: rgba(255,255,255,30); color: white; }
+STYLE = f"""
+QLabel#title {{ color: #ffffff; font-weight: bold; background: transparent; }}
+QLabel#text {{ color: {theme.MUTED}; background: transparent; }}
+QPushButton#go {{ background: {theme.ACCENT}; color: white; border: none; border-radius: 10px; padding: 6px 16px;
+                 font-weight: bold; }}
+QPushButton#go:hover {{ background: {theme.ACCENT_HOVER}; }}
+QPushButton#go:disabled {{ background: {theme.ACCENT_SOFT}; color: #b9cdee; }}
+QPushButton#close {{ background: transparent; color: {theme.MUTED}; border: none; border-radius: 10px;
+                    font-size: 15px; padding: 0 6px; }}
+QPushButton#close:hover {{ background: {theme.HOVER}; color: white; }}
 """
 
 
@@ -92,14 +93,14 @@ class UpdateToast(QWidget):
         r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         path = QPainterPath()
         path.addRoundedRect(r, self.RADIUS, self.RADIUS)
-        p.fillPath(path, QColor(24, 26, 30, 245))
-        p.setPen(QColor(255, 255, 255, 40))
+        p.fillPath(path, theme.qc(theme.PANEL, 248))
+        p.setPen(theme.qc(theme.BORDER))
         p.drawPath(path)
         if self._pct >= 0:                               # barra fina en el borde inferior
             bar = QPainterPath()
             w = (self.width() - 2 * self.RADIUS) * self._pct / 100.0
             bar.addRoundedRect(QRectF(self.RADIUS, self.height() - 7, max(w, 4), 3), 1.5, 1.5)
-            p.fillPath(bar, QColor(90, 160, 255))
+            p.fillPath(bar, theme.qc(theme.ACCENT))
 
     def set_progress(self, pct):
         self._pct = pct
@@ -111,7 +112,7 @@ class UpdateToast(QWidget):
             return
         self.adjustSize()
         bar = getattr(par, "toolbar", None)
-        bottom = par.height() - (bar.height() if bar is not None and bar.isVisible() else 0)
+        bottom = bar.y() if bar is not None and bar.isVisible() else par.height()
         self.move(par.width() - self.width() - 16, bottom - self.height() - 16)
 
     def pop(self):

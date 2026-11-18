@@ -1,17 +1,17 @@
 """The Watcher - ventana principal."""
 import os
-import sys
 
-from qt import (QApplication, QButtonGroup, QCursor, QEvent, qexec, QGridLayout, QHBoxLayout, QIcon,
-               QMessageBox, QPushButton, Qt, QTimer, QVBoxLayout, QWidget)
+from qt import (QButtonGroup, QCursor, QEvent, qexec, QGridLayout, QHBoxLayout, QMessageBox, QPushButton, Qt,
+               QTimer, QVBoxLayout, QWidget)
 
 import config
 import layout as L
+import theme
 from camfps_dialog import CameraFpsDialog
 from discovery_dialogs import NetScanDialog, OnvifDialog
 from layout_editor import LayoutDialog
 from stream_manager import QUALITY_MAIN
-from ui import CamerasDialog, PerfBadge, VideoWidget
+from ui import CamerasDialog, PerfBadge, VideoWidget, fill_perf_menu, perf_items
 from update_ui import Updater
 
 MODES = [
@@ -21,18 +21,15 @@ MODES = [
     ("custom", "Mi planilla", "Tu propia distribución. Clic: aplicar · otro clic: editarla"),
 ]
 
-EXIT_STYLE = """
-QPushButton { background: rgba(0,0,0,150); color: #e6e6e6; border: 1px solid rgba(255,255,255,60);
-              border-radius: 6px; }
-QPushButton:hover { background: rgba(31,95,191,230); color: white; }
+EXIT_STYLE = f"""
+QPushButton {{ background: {theme.PANEL}; color: {theme.TEXT}; border: 1px solid {theme.BORDER};
+              border-radius: 16px; }}
+QPushButton:hover {{ background: {theme.ACCENT}; border-color: {theme.ACCENT_HOVER}; color: white; }}
 """
 
-BAR_STYLE = """
-#bar { background: #101010; }
-#bar QPushButton { background: #232323; color: #ddd; border: 1px solid #3a3a3a;
-                   border-radius: 4px; padding: 5px 12px; }
-#bar QPushButton:hover { background: #2f2f2f; }
-#bar QPushButton:checked { background: #1f5fbf; border-color: #6aa8ff; color: white; }
+BAR_STYLE = f"""
+#bar {{ background: {theme.PANEL}; border: 1px solid {theme.BORDER}; border-radius: 14px; }}
+#bar QPushButton {{ padding: 6px 14px; border-radius: 10px; }}
 """
 
 
@@ -41,7 +38,9 @@ class MainWindow(QWidget):
         super().__init__()
         self.setWindowTitle("The Watcher")
         self.setMinimumSize(480, 260)
-        self.setStyleSheet("MainWindow { background: black; }")
+        theme.apply()                             # tema oscuro azul grisáceo, todo redondeado
+        self.setStyleSheet(f"MainWindow {{ background: {theme.BG}; }}")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)    # pinta el fondo entre cámaras
         self.cfg = config.load()
         self.widgets, self.zoomed, self._saved_q, self._mini = [], None, None, False
         self._dims, self._unassigned = (0, 0), []
@@ -50,17 +49,19 @@ class MainWindow(QWidget):
         self.stage = QWidget()
         self.grid = QGridLayout(self.stage)
         self.grid.setContentsMargins(0, 0, 0, 0)
-        self.grid.setSpacing(2)
+        self.grid.setSpacing(6)
         self._build_toolbar()
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        root.setContentsMargins(6, 6, 6, 6)          # las cámaras y la barra «flotan» sobre el fondo
+        root.setSpacing(6)
         root.addWidget(self.stage, 1)
         root.addWidget(self.toolbar)
         self._build_exit_button()
         self.perf = PerfBadge(self, float(self.cfg.get("perf_opacity", 0.85)),
                               float(self.cfg.get("perf_interval", 2.0)))
+        self.perf.menu_provider = lambda m: fill_perf_menu(m, self)
+        self._configure_perf()
         self._update_perf()
 
         self.rebuild()
@@ -77,7 +78,7 @@ class MainWindow(QWidget):
         self.toolbar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.toolbar.setStyleSheet(BAR_STYLE)
         h = QHBoxLayout(self.toolbar)
-        h.setContentsMargins(8, 5, 8, 5)
+        h.setContentsMargins(8, 6, 8, 6)
         h.setSpacing(6)
         group = QButtonGroup(self)
         group.setExclusive(True)
@@ -182,6 +183,7 @@ class MainWindow(QWidget):
         for w in self.widgets:
             w.shutdown()
             self.grid.removeWidget(w)
+            w.hide()                          # no queda dibujada hasta que Qt la borre
             w.deleteLater()
         self.widgets = []
         cams = self.cfg["cameras"]
@@ -240,6 +242,34 @@ class MainWindow(QWidget):
         self.cfg["perf_interval"] = seconds
         self.save()
         self.perf.set_interval(seconds)
+
+    def _configure_perf(self):
+        self.perf.configure(perf_items(self.cfg), self.cfg.get("perf_net_unit", "auto_B"),
+                            self.cfg.get("perf_net_dir", "both"))
+
+    def set_perf_item(self, key, on):
+        """Muestra u oculta CPU / RAM / GPU / red en el monitor (siempre queda al menos uno)."""
+        items = perf_items(self.cfg)
+        if on and key not in items:
+            items.append(key)
+        elif not on and key in items and len(items) > 1:
+            items.remove(key)
+        self.cfg["perf_items"] = perf_items({"perf_items": items})
+        self.save()
+        self._configure_perf()
+
+    def set_perf_net(self, unit=None, direction=None):
+        """Unidad (bytes/bits, auto o fija) y dirección (bajada/subida) del tráfico de red."""
+        if unit:
+            self.cfg["perf_net_unit"] = unit
+        if direction:
+            self.cfg["perf_net_dir"] = direction
+        items = perf_items(self.cfg)
+        if "net" not in items:                    # elegir una unidad implica querer ver la red
+            items.append("net")
+            self.cfg["perf_items"] = perf_items({"perf_items": items})
+        self.save()
+        self._configure_perf()
 
     def toggle_perf(self):
         self.cfg["perf_monitor"] = not self.cfg.get("perf_monitor", True)
