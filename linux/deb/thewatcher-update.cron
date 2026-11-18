@@ -1,0 +1,2 @@
+# The Watcher: instala la versión nueva cuando la pedís con el botón «Actualizar» (revisa cada minuto)
+* * * * * root [ -x /usr/libexec/thewatcher-update ] && /usr/libexec/thewatcher-update

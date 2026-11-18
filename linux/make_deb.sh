@@ -27,6 +27,13 @@ install -m 644 "$(icon_for 48)" "$STAGE/usr/share/pixmaps/thewatcher.png"   # me
 
 install -D -m 755 "$HERE/deb/thewatcher-wifi" "$STAGE/usr/libexec/thewatcher-wifi"
 install -D -m 644 "$HERE/deb/60-thewatcher-wifi.rules" "$STAGE/usr/lib/udev/rules.d/60-thewatcher-wifi.rules"
+install -D -m 755 "$HERE/deb/thewatcher-wifi-watchdog" "$STAGE/usr/libexec/thewatcher-wifi-watchdog"
+install -D -m 644 "$HERE/deb/thewatcher-wifi.cron" "$STAGE/etc/cron.d/thewatcher-wifi"
+install -D -m 644 "$HERE/deb/thewatcher-wifi.modprobe" "$STAGE/usr/lib/modprobe.d/thewatcher-wifi.conf"
+install -D -m 644 "$HERE/deb/thewatcher-net.default" "$STAGE/etc/default/thewatcher-net"
+install -D -m 755 "$HERE/deb/thewatcher-update" "$STAGE/usr/libexec/thewatcher-update"
+install -D -m 644 "$HERE/deb/thewatcher-update.cron" "$STAGE/etc/cron.d/thewatcher-update"
+printf '%s\n' /etc/cron.d/thewatcher-wifi /etc/cron.d/thewatcher-update /etc/default/thewatcher-net > "$STAGE/DEBIAN/conffiles"
 install -m 755 "$HERE/deb/postinst" "$STAGE/DEBIAN/postinst"
 install -m 755 "$HERE/deb/postrm" "$STAGE/DEBIAN/postrm"
 SIZE="$(du -sk "$STAGE" | cut -f1)"

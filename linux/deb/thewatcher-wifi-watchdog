@@ -1,0 +1,122 @@
+#!/bin/sh
+# Vigilante de la red (lo corre cron cada minuto, como root).
+#  - Mantiene cada placa inalámbrica al máximo (thewatcher-wifi).
+#  - Si hay un adaptador Wi-Fi USB, apaga la placa Wi-Fi interna para que no compitan
+#    (se vuelve a prender sola si sacás el USB o si el USB se queda sin red).
+#    El cable de red siempre tiene prioridad: el administrador de red lo elige primero.
+#  - Si la red se cae y no vuelve sola: reconecta el Wi-Fi, después reinicia el adaptador.
+# Registro: /var/log/thewatcher-wifi.log    Ajustes: /etc/default/thewatcher-net
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+RUN=/run/thewatcher-wifi
+LOG=/var/log/thewatcher-wifi.log
+PREFER_USB=1
+[ -r /etc/default/thewatcher-net ] && . /etc/default/thewatcher-net
+mkdir -p "$RUN"
+
+log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
+
+wifi_ifs() {
+    for d in /sys/class/net/*; do
+        [ -d "$d/wireless" ] || [ -e "$d/phy80211" ] || continue
+        basename "$d"
+    done
+}
+bus_of() { case "$(readlink -f "/sys/class/net/$1/device" 2>/dev/null)" in */usb*) echo usb ;; */pci*) echo pci ;; *) echo otro ;; esac; }
+
+wifi_restart() {
+    if command -v connmanctl >/dev/null 2>&1; then
+        connmanctl disable wifi >/dev/null 2>&1; sleep 3; connmanctl enable wifi >/dev/null 2>&1
+    elif command -v nmcli >/dev/null 2>&1; then
+        nmcli radio wifi off >/dev/null 2>&1; sleep 3; nmcli radio wifi on >/dev/null 2>&1
+    fi
+}
+
+internal_on() {           # vuelve a prender la placa interna que apagamos nosotros
+    [ -f "$RUN/unbound" ] || return 0
+    while read -r drv pci; do
+        echo "$pci" > "/sys/bus/pci/drivers/$drv/bind" 2>/dev/null
+        log "Placa Wi-Fi interna encendida de nuevo ($drv $pci)"
+    done < "$RUN/unbound"
+    rm -f "$RUN/unbound"
+}
+
+internal_off() {          # apaga las placas Wi-Fi internas (PCI) dejando funcionar el USB
+    for i in $(wifi_ifs); do
+        [ "$(bus_of "$i")" = pci ] || continue
+        dev="$(readlink -f "/sys/class/net/$i/device")"
+        drv="$(basename "$(readlink -f "$dev/driver")")"
+        pci="$(basename "$dev")"
+        grep -q " $pci\$" "$RUN/unbound" 2>/dev/null && continue    # ya la apagamos
+        echo "$pci" > "/sys/bus/pci/drivers/$drv/unbind" 2>/dev/null || continue
+        echo "$drv $pci" >> "$RUN/unbound"
+        log "Hay Wi-Fi USB: apago la placa Wi-Fi interna $i ($drv $pci)"
+    done
+}
+
+reset_if() {              # reinicia el adaptador: USB = desconectar y conectar; PCI = recargar el driver
+    dev="$(readlink -f "/sys/class/net/$1/device" 2>/dev/null)"
+    case "$dev" in
+        */usb*)
+            p="$dev"
+            while [ -n "$p" ] && [ "$p" != / ] && [ ! -f "$p/idVendor" ]; do p="$(dirname "$p")"; done
+            if [ -f "$p/authorized" ]; then
+                log "Reinicio el adaptador USB $1"
+                echo 0 > "$p/authorized"; sleep 2; echo 1 > "$p/authorized"; sleep 5
+            fi
+            ;;
+        */pci*)
+            m="$(basename "$(readlink -f "$dev/driver/module" 2>/dev/null)")"
+            if [ -n "$m" ] && [ "$m" != . ]; then
+                log "Reinicio el driver $m ($1)"
+                modprobe -r "$m" 2>/dev/null; sleep 2; modprobe "$m" 2>/dev/null; sleep 5
+            fi
+            ;;
+    esac
+}
+
+# 1) Ajustes al máximo en todas las placas
+/usr/libexec/thewatcher-wifi >/dev/null 2>&1
+
+# 2) USB primero; la interna solo si no hay USB (o si el USB falló)
+IFS_ALL="$(wifi_ifs)"
+HAS_USB=0
+for i in $IFS_ALL; do [ "$(bus_of "$i")" = usb ] && HAS_USB=1; done
+if [ "$HAS_USB" = 1 ] && [ "$PREFER_USB" = 1 ] && [ ! -f "$RUN/fallback" ]; then
+    internal_off
+elif [ "$HAS_USB" = 0 ]; then
+    internal_on
+    rm -f "$RUN/fallback"
+fi
+
+# 3) ¿Hay red?
+GW="$(ip route show default 2>/dev/null | awk '{print $3; exit}')"
+if [ -n "$GW" ] && ping -c 2 -W 2 "$GW" >/dev/null 2>&1; then
+    [ -f "$RUN/fails" ] && log "Red recuperada"
+    rm -f "$RUN/fails"
+    exit 0
+fi
+[ -n "$IFS_ALL" ] || [ -f "$RUN/unbound" ] || exit 0     # sin Wi-Fi (solo cable): no hay nada que reconectar
+
+N=$(( $(cat "$RUN/fails" 2>/dev/null || echo 0) + 1 ))
+echo "$N" > "$RUN/fails"
+case "$N" in
+    1) log "Sin red: espero un minuto por si vuelve sola" ;;
+    2|3) log "Sin red: reconecto el Wi-Fi ($N)"; wifi_restart ;;
+    4)
+        for i in $IFS_ALL; do reset_if "$i"; done
+        wifi_restart
+        ;;
+    *)
+        if [ -f "$RUN/unbound" ]; then                 # el USB no levanta: probamos con la interna
+            log "El Wi-Fi USB no logra conectar: uso también la placa interna"
+            internal_on
+            touch "$RUN/fallback"
+            wifi_restart
+        else
+            for i in $IFS_ALL; do reset_if "$i"; done
+            wifi_restart
+        fi
+        echo 1 > "$RUN/fails"
+        ;;
+esac
+exit 0

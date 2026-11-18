@@ -1,14 +1,57 @@
 #!/bin/sh
-# Apaga el ahorro de energía del Wi-Fi. Con él activo el adaptador se «duerme» entre paquetes
-# y el video de las cámaras llega a tirones, se corta y se reconecta sin parar.
+# Pone cada placa de red inalámbrica a rendir al máximo y sin cortes (la llaman udev al conectarla
+# y el vigilante cada minuto; repetirlo no hace daño):
+#  - sin ahorro de energía (con él la placa se «duerme» y el video llega a tirones o se corta);
+#  - si es USB, sin suspensión automática del puerto (los adaptadores USB se desconectan solos);
+#  - país configurado: sin él Linux usa el modo mundial, con menos potencia de transmisión.
 # Uso: thewatcher-wifi [interfaz]   (sin interfaz: todas las inalámbricas)
+# Ajustes opcionales en /etc/default/thewatcher-net
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+COUNTRY=auto
+[ -r /etc/default/thewatcher-net ] && . /etc/default/thewatcher-net
+
+country() {                       # código de país: el elegido o el de la zona horaria
+    if [ "$COUNTRY" != auto ]; then echo "$COUNTRY"; return; fi
+    tz="$(cat /etc/timezone 2>/dev/null || readlink /etc/localtime 2>/dev/null)"
+    case "$tz" in
+        *America/Argentina*|*America/Buenos_Aires*|*America/Cordoba*|*America/Mendoza*) echo AR ;;
+        *America/Montevideo*) echo UY ;;
+        *America/Santiago*) echo CL ;;
+        *America/Asuncion*) echo PY ;;
+        *America/Sao_Paulo*) echo BR ;;
+        *America/Mexico_City*) echo MX ;;
+        *Europe/Madrid*) echo ES ;;
+    esac
+}
+
+c="$(country)"
+if [ -n "$c" ] && command -v iw >/dev/null 2>&1; then
+    iw reg get 2>/dev/null | grep -q "^country $c:" || iw reg set "$c" 2>/dev/null
+fi
+
 for d in ${1:-$(ls /sys/class/net)}; do
     [ -d "/sys/class/net/$d/wireless" ] || [ -e "/sys/class/net/$d/phy80211" ] || continue
-    for c in /usr/sbin/iw /sbin/iw; do
-        [ -x "$c" ] && { "$c" dev "$d" set power_save off 2>/dev/null; break; }
-    done
-    for c in /usr/sbin/iwconfig /sbin/iwconfig; do            # drivers viejos (p. ej. Broadcom «wl»)
-        [ -x "$c" ] && { "$c" "$d" power off 2>/dev/null; break; }
-    done
+    if command -v iw >/dev/null 2>&1; then
+        iw dev "$d" set power_save off 2>/dev/null
+        iw dev "$d" set txpower auto 2>/dev/null       # la máxima que permite el país
+    fi
+    command -v iwconfig >/dev/null 2>&1 && iwconfig "$d" power off 2>/dev/null   # drivers viejos
+    dev="$(readlink -f "/sys/class/net/$d/device" 2>/dev/null)"
+    case "$dev" in
+        */usb*)                                         # sube hasta el dispositivo USB y le quita la suspensión
+            p="$dev"
+            while [ -n "$p" ] && [ "$p" != / ]; do
+                if [ -f "$p/power/control" ] && [ -f "$p/idVendor" ]; then
+                    echo on > "$p/power/control" 2>/dev/null
+                    echo -1 > "$p/power/autosuspend_delay_ms" 2>/dev/null
+                    break
+                fi
+                p="$(dirname "$p")"
+            done
+            ;;
+        */pci*)
+            [ -f "$dev/power/control" ] && echo on > "$dev/power/control" 2>/dev/null
+            ;;
+    esac
 done
 exit 0

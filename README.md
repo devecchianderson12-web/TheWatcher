@@ -23,6 +23,10 @@ En **Releases → «The Watcher X.Y.Z»** (el marcado como *Latest*) están siem
   contraseña de iCSee. El tope es 15 fps (más satura el Wi-Fi de las cámaras); si a esa resolución admite menos,
   la cámara lo recorta y el diálogo te muestra lo que aceptó de verdad. «Fluidez (FPS)» sigue limitando lo que se
   dibuja en pantalla.
+- **Actualizaciones:** al rato de abrir y cada 3 horas revisa el Release. Si hay una versión más nueva aparece
+  un cartel abajo a la derecha con **Actualizar**: la descarga, reemplaza la vieja (sin dejar copias) y se
+  vuelve a abrir. Si algo falla muestra el motivo y **Reintentar**; nunca queda trabado. En Linux con el `.deb`
+  la instala el sistema (tarda hasta 1 minuto en empezar); en Windows con instalador pide permiso de administrador.
 - **Arrastrar** una cámara sobre otra las intercambia. **Doble clic** maximiza (Esc para volver). **F11** pantalla completa.
 
 ## Configuración

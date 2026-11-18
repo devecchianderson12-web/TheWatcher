@@ -1,4 +1,5 @@
 """The Watcher - ventana principal."""
+import os
 import sys
 
 from qt import (QApplication, QButtonGroup, QCursor, QEvent, qexec, QGridLayout, QHBoxLayout, QIcon,
@@ -11,6 +12,7 @@ from discovery_dialogs import NetScanDialog, OnvifDialog
 from layout_editor import LayoutDialog
 from stream_manager import QUALITY_MAIN
 from ui import CamerasDialog, PerfBadge, VideoWidget
+from update_ui import Updater
 
 MODES = [
     ("grid", "Cuadrícula", "Todas las cámaras en cuadrícula automática, sin huecos"),
@@ -64,6 +66,9 @@ class MainWindow(QWidget):
         self.rebuild()
         if not self.cfg["cameras"]:
             QTimer.singleShot(300, self.manage_cameras)
+        self.updater = Updater(self)              # cartel «Hay una actualización» (abajo a la derecha)
+        if os.environ.get("QT_QPA_PLATFORM") != "offscreen":     # no en el autodiagnóstico
+            self.updater.start()
 
     # ---- barra inferior ----
     def _build_toolbar(self):
@@ -128,6 +133,8 @@ class MainWindow(QWidget):
         self._fs = on
         self.toolbar.setVisible(not on)
         self.exit_btn.hide()
+        if hasattr(self, "updater"):
+            QTimer.singleShot(0, self.updater.reposition)
         if on:
             self._edge_timer.start()
         else:
@@ -139,6 +146,8 @@ class MainWindow(QWidget):
             self.perf.reposition()
         if hasattr(self, "exit_btn"):
             self.exit_btn.move(self.width() - self.exit_btn.width() - 12, 12)
+        if hasattr(self, "updater"):
+            self.updater.reposition()
 
     def _sync_modes(self):
         mode = self.cfg.get("layout_mode", "grid")
@@ -376,6 +385,8 @@ class MainWindow(QWidget):
                 self._set_fullscreen(False)
 
     def closeEvent(self, e):
+        if hasattr(self, "updater"):
+            self.updater.shutdown()
         for w in self.widgets:
             w.shutdown()
         super().closeEvent(e)

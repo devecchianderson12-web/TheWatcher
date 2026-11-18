@@ -1,0 +1,63 @@
+#!/bin/sh
+# Actualizador del sistema para The Watcher (.deb). Lo corre cron cada minuto, como root.
+# Solo actúa si el programa lo pidió (botón «Actualizar»): descarga el .deb del Release oficial,
+# comprueba que sea The Watcher y más nuevo, y lo instala (reemplaza la versión vieja).
+# Pedido: /var/lib/thewatcher/pedido/request (lo crea el usuario; solo se mira si existe).
+# Estado y resultado: /var/lib/thewatcher/update/{status,result} (solo root escribe ahí).
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+REPO="devecchianderson12-web/TheWatcher"
+D=/var/lib/thewatcher/update
+REQ=/var/lib/thewatcher/pedido/request
+CACHE=/var/cache/thewatcher
+LOCK=/run/thewatcher-update.lock
+
+[ -e "$REQ" ] || [ -L "$REQ" ] || exit 0
+find "$LOCK" -maxdepth 0 -mmin +20 -exec rm -rf {} + 2>/dev/null     # traba vieja de una corrida cortada
+mkdir "$LOCK" 2>/dev/null || exit 0                 # ya hay una actualización en curso
+trap 'rm -rf "$LOCK" "$CACHE"' EXIT
+rm -f "$REQ"
+mkdir -p "$D"
+
+say() { printf '%s\n' "$*" > "$D/status.tmp" && mv -f "$D/status.tmp" "$D/status"; chmod 644 "$D/status"; }
+fin() { printf '%s\n' "$*" > "$D/result.tmp" && mv -f "$D/result.tmp" "$D/result"; chmod 644 "$D/result"; exit 0; }
+
+get() {     # get URL [archivo]
+    if command -v curl >/dev/null 2>&1; then
+        if [ -n "$2" ]; then curl -fsSL --connect-timeout 20 --speed-limit 1024 --speed-time 30 -o "$2" "$1"
+        else curl -fsSL --connect-timeout 20 --max-time 60 "$1"; fi
+    else
+        if [ -n "$2" ]; then wget -q -T 30 -t 2 -O "$2" "$1"
+        else wget -q -T 30 -t 2 -O - "$1"; fi
+    fi
+}
+
+say "descargando"
+JSON="$(get "https://api.github.com/repos/$REPO/releases/latest")" || fin "error no se pudo consultar GitHub"
+URL="$(printf '%s' "$JSON" | grep -o '"browser_download_url": *"[^"]*thewatcher_[0-9.]*_amd64\.deb"' \
+       | head -n1 | sed 's/.*"\(https:[^"]*\)"$/\1/')"
+case "$URL" in
+    https://github.com/$REPO/releases/download/*) ;;
+    *) fin "error el Release no tiene el paquete .deb" ;;
+esac
+NEW="$(printf '%s' "$URL" | sed 's/.*thewatcher_\([0-9.]*\)_amd64\.deb$/\1/')"
+CUR="$(dpkg-query -W -f='${Version}' thewatcher 2>/dev/null)"
+if [ -n "$CUR" ] && ! dpkg --compare-versions "$NEW" gt "$CUR"; then
+    fin "ok $CUR"                                    # ya está la última
+fi
+
+rm -rf "$CACHE"; mkdir -p "$CACHE"
+F="$CACHE/thewatcher_${NEW}_amd64.deb"
+get "$URL" "$F" || fin "error la descarga se cortó"
+[ "$(dpkg-deb -f "$F" Package 2>/dev/null)" = thewatcher ] || fin "error el archivo descargado no es válido"
+[ "$(dpkg-deb -f "$F" Version 2>/dev/null)" = "$NEW" ] || fin "error el archivo descargado no es válido"
+
+say "instalando"
+export DEBIAN_FRONTEND=noninteractive
+if command -v apt-get >/dev/null 2>&1; then
+    timeout 600 apt-get install -y -q -o Dpkg::Options::=--force-confold "$F" >/dev/null 2>&1 \
+        || timeout 300 dpkg -i --force-confold "$F" >/dev/null 2>&1 \
+        || fin "error no se pudo instalar (¿otro programa está instalando?)"
+else
+    timeout 300 dpkg -i --force-confold "$F" >/dev/null 2>&1 || fin "error no se pudo instalar"
+fi
+fin "ok $NEW"

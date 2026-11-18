@@ -86,6 +86,18 @@ def _gui_check():
     win.set_perf_interval(2.0)
     assert not win.perf.grab().isNull()
     win.perf.set_active(False)
+    import updater                                        # cartel de actualización: todos sus estados
+    assert updater.is_newer("1.10.0", "1.9.9") and not updater.is_newer("1.2.0", "1.2.0")
+    up = win.updater
+    up.info = {"version": "9.9.9", "url": "https://example.invalid/x", "size": 0}
+    up._show_offer()
+    app.processEvents()
+    assert up.toast.isVisible() and not up.toast.grab().isNull()
+    up._on_progress(50, 100)
+    up._on_failed("prueba")
+    assert up.toast.go.isEnabled() and not up.working
+    up._on_close()
+    up.err_timer.stop()
     assert w.build_menu().actions()                       # menú de calidad / resolución
     for dlg in (CamerasDialog([cam]), LayoutDialog([cam], LY.default_editor_layout([cam])),
                 OnvifDialog(set()), NetScanDialog(set())):

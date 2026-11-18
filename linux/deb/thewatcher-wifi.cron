@@ -1,0 +1,2 @@
+# The Watcher: revisa cada minuto que el Wi-Fi siga conectado y lo reconecta si se cayó
+* * * * * root [ -x /usr/libexec/thewatcher-wifi-watchdog ] && /usr/libexec/thewatcher-wifi-watchdog

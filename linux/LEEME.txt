@@ -12,4 +12,9 @@ Si no abre y dice que faltan librerías, instala (Debian/Ubuntu/Mint):
 La configuración se guarda en ~/.config/TheWatcher/config.json
 Si las cámaras se cortan o reconectan seguido por Wi-Fi, apagá el ahorro de energía del Wi-Fi
 (el paquete .deb ya lo hace solo):  sudo iw dev wlan0 set power_save off
+El .deb también trae un vigilante (revisa cada minuto): deja cada placa Wi-Fi al máximo (sin ahorro de
+energía, sin suspensión USB, potencia del país), si hay un Wi-Fi USB apaga la placa interna para que no
+compitan y, si la red se cae, la reconecta sola. El cable de red siempre tiene prioridad.
+Ajustes: /etc/default/thewatcher-net
+Registro de cortes:  cat /var/log/thewatcher-wifi.log
 Para «Buscar ONVIF» el cortafuegos debe permitir las respuestas UDP (ufw: sudo ufw allow from 192.168.0.0/16 to any proto udp).

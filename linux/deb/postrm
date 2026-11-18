@@ -1,11 +1,21 @@
 #!/bin/sh
 set -e
 if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    if [ -f /run/thewatcher-wifi/unbound ]; then         # vuelve a prender la placa Wi-Fi interna
+        while read -r drv pci; do
+            echo "$pci" > "/sys/bus/pci/drivers/$drv/bind" 2>/dev/null || true
+        done < /run/thewatcher-wifi/unbound
+    fi
+    rm -rf /run/thewatcher-wifi /run/thewatcher-wifi.fails /run/thewatcher-wifi.module
     if command -v update-desktop-database >/dev/null 2>&1; then
         update-desktop-database -q /usr/share/applications || true
     fi
     if command -v gtk-update-icon-cache >/dev/null 2>&1; then
         gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
     fi
+fi
+if [ "$1" = "purge" ]; then
+    rm -f /var/log/thewatcher-wifi.log
+    rm -rf /var/lib/thewatcher /var/cache/thewatcher
 fi
 exit 0

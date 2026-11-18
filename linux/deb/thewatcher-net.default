@@ -1,0 +1,9 @@
+# Ajustes de red de The Watcher (los lee el vigilante cada minuto; no hace falta reiniciar)
+
+# País para la potencia del Wi-Fi. «auto» = según la zona horaria (Argentina -> AR).
+# Ejemplos: AR, UY, CL, ES. Vacío = no tocar.
+COUNTRY=auto
+
+# 1 = si hay un adaptador Wi-Fi USB, apagar la placa Wi-Fi interna para que no compitan.
+# 0 = dejar las dos prendidas.
+PREFER_USB=1

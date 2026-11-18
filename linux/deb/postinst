@@ -7,6 +7,9 @@ if [ "$1" = "configure" ]; then
     if command -v gtk-update-icon-cache >/dev/null 2>&1; then
         gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
     fi
+    # actualización desde el programa: el pedido lo deja el usuario, el estado solo lo escribe root
+    install -d -m 1777 /var/lib/thewatcher/pedido
+    install -d -m 0755 /var/lib/thewatcher/update
     command -v udevadm >/dev/null 2>&1 && udevadm control --reload-rules >/dev/null 2>&1 || true
     /usr/libexec/thewatcher-wifi || true      # aplica ya, sin reiniciar
 fi

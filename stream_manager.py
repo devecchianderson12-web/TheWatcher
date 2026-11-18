@@ -1,4 +1,5 @@
 """Lectura RTSP + decodificación con PyAV (FFmpeg incluido). Sin dependencias externas."""
+import errno
 import threading
 import time
 
@@ -24,6 +25,11 @@ def _reason(err):
         return "la cámara no responde"
     if isinstance(err, ConnectionRefusedError):
         return "conexión rechazada"
+    code = getattr(err, "errno", None)
+    if code in (errno.ENETUNREACH, errno.EHOSTUNREACH, errno.ENETDOWN):
+        return "esta PC no tiene red (revisá el Wi-Fi)"
+    if code:
+        return f"error de red {code}"
     return type(err).__name__
 
 QUALITY_SUB = "Transmisión"    # substream: fluido, baja resolución
