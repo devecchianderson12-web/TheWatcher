@@ -2,8 +2,8 @@
 hasta el máximo que admite cada una (25 en PAL, 30 en NTSC)."""
 import threading
 
-from qt import (pyqtSignal, QDialog, QDialogButtonBox, QFormLayout, QGridLayout, QHBoxLayout, QLabel,
-               QLineEdit, QObject, QPushButton, QSlider, QSpinBox, Qt, QVBoxLayout, QWidget)
+from qt import (pyqtSignal, QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QGridLayout, QHBoxLayout,
+               QLabel, QLineEdit, QObject, QPushButton, QSlider, QSpinBox, Qt, QVBoxLayout, QWidget)
 
 import camctl
 
@@ -39,6 +39,10 @@ class CameraFpsDialog(QDialog):
         self.streams = QWidget()
         self.grid = QGridLayout(self.streams)
         self.grid.setContentsMargins(0, 0, 0, 0)
+        self.steady = QCheckBox("FPS fijos también con poca luz (apaga el modo poca luz; de noche se ve más oscuro)")
+        self.wifi = QCheckBox("HD optimizado para WiFi (1536 kbps, keyframe cada 8 s: menos tirones)")
+        for box in (self.steady, self.wifi):
+            box.setEnabled(False)
         self.status = QLabel("Ingresá el usuario y la contraseña de la cámara y tocá «Leer de la cámara».")
         self.status.setWordWrap(True)
 
@@ -56,9 +60,11 @@ class CameraFpsDialog(QDialog):
         root = QVBoxLayout(self)
         root.addLayout(top)
         root.addWidget(self.streams)
+        root.addWidget(self.steady)
+        root.addWidget(self.wifi)
         root.addWidget(self.status)
         root.addWidget(self.buttons)
-        self.resize(520, 300)
+        self.resize(560, 340)
         if self.password.text():               # ya hay datos guardados: lee solo
             self._read()
 
@@ -90,7 +96,9 @@ class CameraFpsDialog(QDialog):
     def _apply(self):
         ip, user, pw, port = self._creds()
         wanted = {key: spin.value() for key, spin in self._rows.items()}
-        self._run("Guardando en la cámara…", camctl.write_fps, ip, user, pw, wanted, port)
+        low_lux = not self.steady.isChecked() if self.steady.isEnabled() else None
+        self._run("Guardando en la cámara…", camctl.write_fps, ip, user, pw, wanted, port,
+                  low_lux, self.wifi.isChecked())
 
     def _on_done(self, result, error):
         self._busy = False
@@ -150,4 +158,9 @@ class CameraFpsDialog(QDialog):
             self._rows[s["key"]] = spin
             r += 1
         self.grid.setColumnStretch(1, 1)
+        low_lux = result.get("low_lux")
+        self.steady.setEnabled(low_lux is not None)     # algunas cámaras no tienen modo poca luz
+        self.steady.setChecked(low_lux is False)
+        self.wifi.setEnabled(True)
+        self.wifi.setChecked(bool(result.get("wifi")))
         self.apply_btn.setEnabled(bool(self._rows))

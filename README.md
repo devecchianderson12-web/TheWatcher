@@ -27,11 +27,18 @@ En **Releases → «The Watcher X.Y.Z»** (el marcado como *Latest*) están siem
   contraseña de iCSee. El tope es 15 fps (más satura el Wi-Fi de las cámaras); si a esa resolución admite menos,
   la cámara lo recorta y el diálogo te muestra lo que aceptó de verdad. «Fluidez (FPS)» sigue limitando lo que se
   dibuja en pantalla.
+  - **FPS fijos también con poca luz:** apaga el modo poca luz de la cámara, que baja los FPS para aclarar la
+    imagen (de noche se ve más oscuro).
+  - **HD optimizado para WiFi:** 1536 kbps VBR y keyframe cada 8 s. El keyframe es el cuadro pesado que, al pasar
+    por WiFi, atrasa a los demás y hace que los FPS bajen y suban.
+  Como se guarda en la cámara, vale para cualquier app (también iCSee).
 - **Actualizaciones:** al rato de abrir y cada 3 horas revisa el Release. Si hay una versión más nueva aparece
   un cartel abajo a la derecha con **Actualizar**: la descarga, reemplaza la vieja (sin dejar copias) y se
   vuelve a abrir. Si algo falla muestra el motivo y **Reintentar**; nunca queda trabado. En Linux con el `.deb`
   la instala el sistema (tarda hasta 1 minuto en empezar); en Windows con instalador pide permiso de administrador.
 - **Aspecto:** tema oscuro azul grisáceo con bordes redondeados en cámaras, barra, menús, botones y ventanas.
+- **Fluidez (FPS):** los cuadros se muestran al ritmo de la cámara (sus marcas de tiempo) con un colchón de 0,2 s,
+  no al ritmo irregular del WiFi: una cámara a 15 fps se ve a 15 fps parejos.
 - **Arrastrar** una cámara sobre otra las intercambia. **Doble clic** maximiza (Esc para volver). **F11** pantalla completa.
 
 ## Configuración

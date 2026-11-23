@@ -123,9 +123,11 @@ def _gui_check():
     fd = CameraFpsDialog(cam)                             # FPS de la cámara: tope por cámara
     fd._show({"max": 25, "streams": [
         {"channel": 0, "key": "MainFormat", "label": "Convencional", "resolution": "3M", "fps": 30},
-        {"channel": 0, "key": "ExtraFormat", "label": "Transmisión", "resolution": "D1", "fps": 12}]})
+        {"channel": 0, "key": "ExtraFormat", "label": "Transmisión", "resolution": "D1", "fps": 12}],
+        "low_lux": False, "wifi": True})
     assert fd._rows["MainFormat"].maximum() == 25 and fd._rows["MainFormat"].value() == 25
     assert fd._rows["ExtraFormat"].value() == 12
+    assert fd.steady.isChecked() and fd.wifi.isChecked()
     assert not fd.grab().isNull()
     for x in list(win.widgets):
         x.shutdown()

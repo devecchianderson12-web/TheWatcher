@@ -117,21 +117,46 @@ def _streams(encode):
     return out
 
 
+WIFI_BITRATE, WIFI_GOP = 1536, 8          # HD «para WiFi»: keyframes más chicos y la mitad de seguido
+STD_BITRATE, STD_GOP = 2048, 4            # valores de fábrica habituales, al desactivarlo
+
+
+def _low_lux(cam):
+    """Modo poca luz (baja los FPS a propósito para aclarar la imagen). None si la cámara no lo tiene."""
+    try:
+        v = (cam.get("Camera.ParamEx") or [{}])[0].get("LowLuxMode")
+    except CamError:
+        return None
+    return None if v is None else bool(v)
+
+
+def _wifi_tuned(encode):
+    v = ((encode or [{}])[0].get("MainFormat") or {}).get("Video") or {}
+    return (v.get("BitRateControl") == "VBR" and int(v.get("GOP", 0)) >= WIFI_GOP
+            and int(v.get("BitRate", 0)) <= WIFI_BITRATE)
+
+
+def _state(cam, encode, top):
+    streams = _streams(encode)
+    if not streams:
+        raise CamError("La cámara no informó la configuración de video")
+    return {"max": top, "streams": streams, "low_lux": _low_lux(cam), "wifi": _wifi_tuned(encode)}
+
+
 def read_fps(host, user, password, port=PORT):
-    """Lee los FPS actuales de cada stream y el máximo admitido.
-    Devuelve {"max": int, "streams": [{channel, key, label, resolution, fps}, ...]}."""
+    """Lee los FPS actuales de cada stream, el máximo admitido y los ajustes de fluidez.
+    Devuelve {"max": int, "streams": [{channel, key, label, resolution, fps}, ...],
+    "low_lux": bool | None, "wifi": bool}."""
     with Cam(host, port) as cam:
         cam.login(user, password)
-        encode = cam.get("Simplify.Encode")
-        streams = _streams(encode)
-        if not streams:
-            raise CamError("La cámara no informó la configuración de video")
-        return {"max": _max_fps(cam), "streams": streams}
+        return _state(cam, cam.get("Simplify.Encode"), _max_fps(cam))
 
 
-def write_fps(host, user, password, wanted, port=PORT):
-    """Pone los FPS pedidos ({"MainFormat": 25, "ExtraFormat": 15}), recortados al máximo,
-    y devuelve lo que la cámara aceptó de verdad (algunas recortan por resolución)."""
+def write_fps(host, user, password, wanted, port=PORT, low_lux=None, wifi=None):
+    """Pone los FPS pedidos ({"MainFormat": 25, "ExtraFormat": 15}), recortados al máximo.
+    low_lux: True/False enciende o apaga el modo poca luz (None = no tocar).
+    wifi: True = HD a 1536 kbps VBR con keyframe cada 8 s (menos tirones por WiFi); False = 2048 / 4 s.
+    Devuelve lo que la cámara aceptó de verdad (algunas recortan por resolución)."""
     with Cam(host, port) as cam:
         cam.login(user, password)
         encode = cam.get("Simplify.Encode")
@@ -141,6 +166,14 @@ def write_fps(host, user, password, wanted, port=PORT):
                 v = (cfg.get(key) or {}).get("Video")
                 if v and "FPS" in v:
                     v["FPS"] = max(1, min(int(value), top))
+            main = (cfg.get("MainFormat") or {}).get("Video")
+            if main and wifi is not None and wifi != _wifi_tuned([cfg]):
+                main["BitRateControl"] = "VBR"
+                main["BitRate"], main["GOP"] = (WIFI_BITRATE, WIFI_GOP) if wifi else (STD_BITRATE, STD_GOP)
         cam.set("Simplify.Encode", encode)
-        streams = _streams(cam.get("Simplify.Encode"))
-        return {"max": top, "streams": streams}
+        if low_lux is not None and _low_lux(cam) not in (None, low_lux):
+            px = cam.get("Camera.ParamEx")
+            for ch in px:
+                ch["LowLuxMode"] = int(low_lux)
+            cam.set("Camera.ParamEx", px)
+        return _state(cam, cam.get("Simplify.Encode"), top)
