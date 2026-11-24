@@ -1,4 +1,5 @@
 """Lectura RTSP + decodificación con PyAV (FFmpeg incluido). Sin dependencias externas."""
+import collections
 import errno
 import threading
 import time
@@ -77,20 +78,77 @@ class Pacer:
 
 
 class Steady:
-    """Entrega los cuadros al ritmo de la cámara (sus marcas de tiempo) con un colchón de DELAY segundos,
-    en vez de al ritmo irregular con que llegan por WiFi: 15 fps de la cámara = 15 fps parejos en pantalla."""
-    DELAY = 0.2
+    """Muestra los cuadros al ritmo de la cámara (sus marcas de tiempo), pegado al vivo.
+    «Vivo» = el menor (llegada − marca) de los últimos WINDOW segundos: el cuadro que llegó más rápido.
+    Cada cuadro se muestra DELAY s después de su momento en vivo (colchón contra las ráfagas del WiFi).
+    Si un cuadro llega más de BEHIND s tarde (la PC no da abasto o se juntó atraso al conectar), se decodifica
+    pero no se dibuja, hasta alcanzar el vivo: el atraso nunca se acumula."""
+    DELAY = 0.15
+    BEHIND = 0.3
+    WINDOW = 20.0
+    MAX_GAP = 1.0                     # aunque esté atrasado, muestra al menos un cuadro por segundo
 
     def __init__(self):
-        self.base = None
+        self.offs = collections.deque()       # (llegada, llegada - marca), crecientes: el primero es el vivo
+        self.last_shown = 0.0
 
-    def wait(self, ts, event):
-        """Espera hasta que toque mostrar el cuadro con marca `ts`. Devuelve False si hay que cortar."""
-        now = time.monotonic()
-        if self.base is None or self.base + ts < now - 1.0 or self.base + ts > now + 1.0 + self.DELAY:
-            self.base = now - ts + self.DELAY             # inicio, salto de marcas o atraso grande: resincroniza
-        due = self.base + ts
-        return due <= now or not event.wait(due - now)
+    def plan(self, ts, now):
+        """Hora (monotonic) en que toca mostrar el cuadro con marca `ts` que llegó en `now`, o None = saltearlo."""
+        off = now - ts
+        if self.offs and abs(off - self.offs[0][1]) > 5.0:      # salto de marcas de tiempo: empieza de nuevo
+            self.offs.clear()
+        while self.offs and self.offs[-1][1] >= off:
+            self.offs.pop()
+        self.offs.append((now, off))
+        while self.offs[0][0] < now - self.WINDOW:
+            self.offs.popleft()
+        live = self.offs[0][1]
+        if off - live > self.DELAY + self.BEHIND and now - self.last_shown < self.MAX_GAP:
+            return None
+        self.last_shown = now
+        return ts + live + self.DELAY
+
+
+class Presenter(threading.Thread):
+    """Entrega a la UI cada cuadro a su hora. Corre aparte para que la lectura del stream nunca espere
+    (si esperara, el atraso se juntaría en la red). Si hay varios cuadros vencidos, muestra solo el último."""
+
+    def __init__(self, emit):
+        super().__init__(daemon=True)
+        self.emit = emit
+        self.queue = collections.deque()
+        self.cond = threading.Condition()
+        self.stopped = False
+
+    def put(self, due, arr):
+        with self.cond:
+            self.queue.append((due, arr))
+            if len(self.queue) > 16:                       # nunca acumula
+                self.queue.popleft()
+            self.cond.notify()
+
+    def stop(self):
+        with self.cond:
+            self.stopped = True
+            self.queue.clear()
+            self.cond.notify()
+
+    def run(self):
+        while True:
+            with self.cond:
+                while not self.queue and not self.stopped:
+                    self.cond.wait()
+                if self.stopped:
+                    return
+                due, arr = self.queue[0]
+                now = time.monotonic()
+                if due > now:
+                    self.cond.wait(due - now)              # despierta antes si llega otro cuadro o se corta
+                    continue
+                self.queue.popleft()
+                if self.queue and self.queue[0][0] <= now:
+                    continue                               # ya vence otro más nuevo: este se saltea
+            self.emit(arr)
 
 
 def out_size(mode, fw, fh, tw, th, max_h=0):
@@ -208,6 +266,8 @@ class CameraWorker(threading.Thread):
         wait_key = 0.0                           # tras un error se espera un cuadro clave (sin manchas grises),
                                                  # como mucho 4 s por si la cámara no marca los cuadros clave
         pacer, steady = Pacer(), Steady()
+        presenter = Presenter(self.on_frame)
+        presenter.start()
         try:
             vs = container.streams.video[0]
             vs.codec_context.thread_count = 2 if sub else 0
@@ -238,14 +298,19 @@ class CameraWorker(threading.Thread):
                     ts = frame.time              # segundos según la cámara (None si el stream no los trae)
                     if not pacer.accept(time.monotonic() if ts is None else ts, self.fps):
                         continue                 # descarta sin convertir = ahorra CPU
-                    if ts is not None and not steady.wait(ts, self._reload):
-                        break                    # cambio de calidad / pausa / cierre mientras esperaba
+                    due = None if ts is None else steady.plan(ts, time.monotonic())
+                    if ts is not None and due is None:
+                        continue                 # atrasado: no se dibuja, así alcanza el vivo
                     w, h = out_size(self.fit_mode, frame.width, frame.height, *self.target, self.max_h)
                     arr = frame.to_ndarray(width=w, height=h, format="rgb24")
                     if not arr.flags["C_CONTIGUOUS"]:
                         arr = np.ascontiguousarray(arr)
-                    self.on_frame(arr)
+                    if due is None:
+                        self.on_frame(arr)
+                    else:
+                        presenter.put(due, arr)  # lo muestra a su hora; la lectura sigue sin esperar
                     got = True
         finally:
+            presenter.stop()
             container.close()
         return got
